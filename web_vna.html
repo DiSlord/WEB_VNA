@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>VNA Graph Viewer</title>
+    <link rel="stylesheet" href="vna_styles.css">
+</head>
+<body>
+<div class="container">
+ <div class="side-panel">
+  <div class="bar-column">
+   <label>Traces</label>
+   <div class="bar-row">
+    <button class="trace-btn" id="btnM0" onclick="toggleTrace(0)" oncontextmenu="showContextMenu(event, 0)">Live</button>
+    <button class="trace-btn" id="btnM1" onclick="toggleTrace(1)" oncontextmenu="showContextMenu(event, 1)">M1</button>
+    <button class="trace-btn" id="btnM2" onclick="toggleTrace(2)" oncontextmenu="showContextMenu(event, 2)">M2</button>
+    <button class="trace-btn" id="btnM3" onclick="toggleTrace(3)" oncontextmenu="showContextMenu(event, 3)">M3</button>
+    <button class="trace-btn" id="btnM4" onclick="toggleTrace(4)" oncontextmenu="showContextMenu(event, 4)">M4</button>
+   </div>
+  </div>
+  <div class="bar-column">
+   <label>Markers</label>
+   <div class="bar-row">
+    <button class="btn-main" onclick="addMarker()">
+     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+     Add
+    </button>
+    <button class="btn-main" onclick="changeMarker()" id="btnEdit">
+     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+     Change
+    </button>
+    <button class="btn-main" onclick="removeMarker()" id="btnDelete">
+     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+    Remove
+    </button>
+   </div>
+   <div class="table-wrapper">
+    <table class="table">
+      <thead><tr><th style="width: 40px;">№</th><th>Frequency</th></tr></thead>
+      <tbody id="markerTable"></tbody>
+    </table>
+   </div>
+  </div>
+  <div class="bar-column">
+   <button class="btn-main" onclick="loadTestData()">Test data</button>
+   <button class="btn-main" onclick="graph.resetView()">Reset scale</button>
+  </div>
+ </div>
+ <div class="main-area">
+   <div class="top-bar">
+    <div class="bar-row">
+     <button onclick="copyToClipboard()">📋 Copy</button>
+     <label>Tiling:</label><select id="layoutSelect" onchange="changeLayout(this.value)"></select>
+    </div>
+    <div class="bar-row"><label>Theme:</label><select id="themeSelect" onchange="changeTheme(this.value)"></select></div>
+   </div>
+   <div class="graph-container">
+    <div class="area-panels" id="areaPanels"></div>
+     <canvas id="vnaCanvas"></canvas>
+   </div>
+  </div>
+</div>
+
+<div id="contextMenu" class="context-menu"></div>
+<input type="file" id="fileInput" accept=".s1p,.s2p,.snp,.txt" style="display: none;">
+
+<script src="vna-data.js"></script>
+<script src="vna-math.js"></script>
+<script src="vna-graph.js"></script>
+<script>
+
+const $ = id => document.getElementById(id);
+const themeSelect = $('themeSelect');
+const contextMenu = $('contextMenu');
+const fileInput = $('fileInput');
+const markerTable = $('markerTable');
+const layoutSelect = $('layoutSelect');
+const areaPanels = $('areaPanels');
+const vnaCanvas = $('vnaCanvas');
+
+// ========================================================================
+// === ТЕМЫ ОФОРМЛЕНИЯ ===
+// ========================================================================
+const themeNames = ['Dark', 'Light', 'Gruvbox', 'Catppuccin', 'Material', 'Warm Dark', 'Midnight Blue'];
+const themes = {
+ '--bg': ['#0a0a0f', '#f5f5f5', '#fbf1c7', '#eff1f5', '#fafafa', '#1a1512', '#0a0e1a'],
+ '--surface': ['#14141f', '#ffffff', '#f9f5d7', '#e6e9ef', '#ffffff', '#241e18', '#141a2a'],
+ '--uploadbg': ['#1e1e2e', '#eaeaf0', '#f2e8bc', '#dce0e8', '#f1f3f4', '#2e2620', '#1c2438'],
+ '--border': ['#404040', '#d0d0d8', '#d5c4a1', '#ccd0da', '#dadce0', '#3d342a', '#2a3450'],
+ '--text': ['#f0f0ff', '#000000', '#202020', '#202020', '#202124', '#e8dcc8', '#f0f0ff'],
+ '--btn-text': ['#ffffff', '#000000', '#202020', '#202020', '#202124', '#ffffff', '#ffffff'],
+ '--btext': ['#00e000', '#028800', '#79740e', '#40a02b', '#188038', '#d4a547', '#4ac8e0'],
+ '--na_button': ['#252535', '#e0e0e8', '#ebdbb2', '#ccd0da', '#f1f3f4', '#3a3028', '#252d45'],
+ '--connect': ['#2196F3', '#20e0e0', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
+ '--flash': ['#028800', '#30d040', '#98971a', '#40a02b', '#188038', '#6b9e4a', '#2ab87a'],
+ '--verify': ['#ff8000', '#e09000', '#d65d0e', '#fe640b', '#f9ab00', '#d48a3a', '#e0a040'],
+ '--save': ['#2196F3', '#50b0e0', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
+ '--git': ['#a855f7', '#7048e8', '#b16286', '#8839ef', '#9334e6', '#a86bd4', '#a855f7'],
+ '--unused': ['#7c3aed', '#5f3dc4', '#8f3f71', '#7287fd', '#7c3aed', '#8b5ec4', '#8b5cf6'],
+ '--progress': ['#028800', '#20c040', '#98971a', '#40a02b', '#188038', '#6b9e4a', '#2ab87a'],
+ '--muted': ['#9a9ab8', '#4a4a5a', '#7c6f64', '#5c5f77', '#3c4043', '#9a8a75', '#7a8aaa'],
+ '--accent': ['#5b8cff', '#1a4bc7', '#076678', '#1e55d5', '#0d5bc4', '#d4a574', '#6a9ae4'],
+ '--success': ['#69d97a', '#008a00', '#00c000', '#2d8a1f', '#0d7a2e', '#9ad07a', '#4ad8a8'],
+ '--error': ['#ff6b85', '#b81c1c', '#b8201a', '#b80d2e', '#c1271d', '#e45a4a', '#ff5a6e'],
+ '--warn': ['#ffd866', '#d46a00', '#b57f00', '#c47d00', '#e69500', '#e4b557', '#f0a040'],
+/*
+ '--trace-m0-s11': ['#ffff00', '#ff0000', '#076678', '#1e66f5', '#0d5bc4', '#4a8db8', '#ffff00'],
+ '--trace-m0-s12': ['#0080ff', '#0050b0', '#9d0006', '#d20f39', '#c1271d', '#e45a4a', '#0080ff'],
+ '--trace-m0-s21': ['#00ffff', '#00b0b0', '#9d0006', '#d20f39', '#c1271d', '#e45a4a', '#00ffff'],
+ '--trace-m0-s22': ['#ff8000', '#ff8000', '#076678', '#1e66f5', '#0d5bc4', '#4a8db8', '#ff8000'],
+ '--trace-m1-s11': ['#00ff00', '#008855', '#689d6a', '#40a02b', '#188038', '#9ad07a', '#4ad8a8'],
+ '--trace-m1-s21': ['#ff00ff', '#cc5500', '#d65d0e', '#fe640b', '#f9ab00', '#d48a3a', '#e0a040'],
+ '--trace-m2-s11': ['#00ffff', '#7722cc', '#8f3f71', '#8839ef', '#9334e6', '#a86bd4', '#a855f7'],
+ '--trace-m2-s21': ['#ff0000', '#ccaa00', '#b57f00', '#c47d00', '#e69500', '#e4b557', '#f0a040'],
+ '--trace-m3-s11': ['#00ffcc', '#cc0066', '#b16286', '#d20f39', '#c1271d', '#e45a4a', '#ff5a6e'],
+ '--trace-m3-s21': ['#ccff00', '#00cc99', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
+ '--trace-m4-s11': ['#ff6600', '#cc4400', '#d65d0e', '#fe640b', '#f9ab00', '#d48a3a', '#e0a040'],
+ '--trace-m4-s21': ['#44aaff', '#2288cc', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
+*/
+
+ '--trace-m0-s11': ['#ffff00', '#e5c07b', '#fabd2f', '#df8e1d', '#e5c890', '#eed49f', '#b58900'],
+ '--trace-m0-s21': ['#00ffff', '#56b6c2', '#83a598', '#179299', '#81c8be', '#8bd5ca', '#2aa198'],
+ '--trace-m0-s12': ['#0080ff', '#61afef', '#458588', '#1e66f5', '#8caaee', '#8aadf4', '#268bd2'],
+ '--trace-m0-s22': ['#ff8000', '#d19a66', '#fe8019', '#fe640b', '#ef9f76', '#f5a97f', '#cb4b16'],
+
+ '--trace-m1-s11': ['#00ff00', '#98c379', '#b8bb26', '#40a02b', '#a6d189', '#a6da95', '#859900'],
+ '--trace-m1-s21': ['#ff00ff', '#c678dd', '#d3869b', '#8839ef', '#ca9ee6', '#c6a0f6', '#d33682'],
+ '--trace-m1-s12': ['#88ff00', '#a6e22e', '#b8bb26', '#7ec029', '#b5d96e', '#b5de84', '#7dc845'],
+ '--trace-m1-s22': ['#cc55ff', '#b57edc', '#ab7dc6', '#9a5cc8', '#b8a0d8', '#b4a0d8', '#6c71c4'],
+
+ '--trace-m2-s11': ['#ff4444', '#e06c75', '#fb4934', '#d20f39', '#e78284', '#ed8796', '#dc322f'],
+ '--trace-m2-s21': ['#ffaa00', '#e5c07b', '#fabd2f', '#df8e1d', '#e5c890', '#eed49f', '#b58900'],
+ '--trace-m2-s12': ['#ff66aa', '#f472b6', '#d3869b', '#ea76cb', '#f4b8e4', '#f5bde6', '#d33682'],
+ '--trace-m2-s22': ['#ffdd44', '#f9e2af', '#fabd2f', '#df8e1d', '#e5c890', '#eed49f', '#b58900'],
+
+ '--trace-m3-s11': ['#00ffcc', '#56b6c2', '#8ec07c', '#179299', '#81c8be', '#8bd5ca', '#2aa198'],
+ '--trace-m3-s21': ['#ccff00', '#a6e22e', '#b8bb26', '#40a02b', '#a6d189', '#a6da95', '#859900'],
+ '--trace-m3-s12': ['#44ddff', '#61afef', '#83a598', '#04a5e5', '#85c1dc', '#91d7e3', '#268bd2'],
+ '--trace-m3-s22': ['#88ff88', '#98c379', '#b8bb26', '#40a02b', '#a6d189', '#a6da95', '#859900'],
+
+ '--trace-m4-s11': ['#ff6600', '#d19a66', '#fe8019', '#fe640b', '#ef9f76', '#f5a97f', '#cb4b16'],
+ '--trace-m4-s21': ['#44aaff', '#61afef', '#458588', '#1e66f5', '#8caaee', '#8aadf4', '#268bd2'],
+ '--trace-m4-s12': ['#aa66ff', '#c678dd', '#d3869b', '#8839ef', '#ca9ee6', '#c6a0f6', '#6c71c4'],
+ '--trace-m4-s22': ['#66ffaa', '#56b6c2', '#8ec07c', '#179299', '#81c8be', '#8bd5ca', '#2aa198'],
+
+ '--plot-grid': ['#404040', '#d0d0d8', '#d5c4a1', '#ccd0da', '#dadce0', '#3d342a', '#2a3450'],
+ '--plot-border': ['#404040', '#a0a0a8', '#bdae93', '#8c8fa1', '#9aa0a6', '#5d5040', '#3a4460'],
+ '--plot-axis-text': ['#aaaaaa', '#333333', '#504945', '#4c4f69', '#5f6368', '#b8a88a', '#8a9aba'],
+ '--marker-color': ['#ff3333', '#cc0000', '#cc241d', '#d20f39', '#c1271d', '#e45a4a', '#ff5a6e'],
+ '--marker-label': ['#ffffff', '#000000', '#202020', '#202020', '#202124', '#e8dcc8', '#f0f0ff'],
+ '--cursor-line': ['#606060', '#a0a0a0', '#a0a0a0', '#a0a0a0', '#a0a0a0', '#606060', '#8080a0'],
+ '--tooltip-bg': ['rgba(30,30,40,0.95)', 'rgba(240,240,245,0.95)', 'rgba(242,232,188,0.95)', 'rgba(220,224,232,0.95)', 'rgba(241,243,244,0.95)', 'rgba(46,38,32,0.95)', 'rgba(28,36,56,0.95)'],
+ '--tooltip-border': ['#666666', '#a0a0a8', '#bdae93', '#8c8fa1', '#9aa0a6', '#5d5040', '#3a4460'],
+ '--tooltip-text': ['#ffffff', '#000000', '#202020', '#202020', '#202124', '#e8dcc8', '#f0f0ff'],
+ '--overlay-bg': ['#33FF6464', '#26FF6464', '#33CC241D', '#26D20F39', '#26C1271D', '#33E45A4A', '#33FF5A6E'],
+ '--overlay-text': ['#ffffff', '#000000', '#202020', '#202020', '#202124', '#e8dcc8', '#f0f0ff']
+};
+
+function applyTheme(index) {
+  if (index < 0 || index >= themeNames.length) index = 0;
+  for (const [prop, values] of Object.entries(themes)) document.documentElement.style.setProperty(prop, values[index]);
+  localStorage.setItem('vna-theme', index);
+}
+
+function initThemes() {
+  themeNames.forEach((name, id) => {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = name;
+    themeSelect.appendChild(o);
+  });
+  const savedTheme = parseInt(localStorage.getItem('vna-theme')) || 0;
+  themeSelect.value = savedTheme;
+  applyTheme(savedTheme);
+}
+
+function changeTheme(index) {
+  applyTheme(parseInt(index));
+  graph.redraw();
+}
+
+// ========================================================================
+// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+// ========================================================================
+let vnaData;
+let graph;
+
+// ========================================================================
+// === КОНТЕКСТНОЕ МЕНЮ ===
+// ========================================================================
+function addMenuItem(menu, textContent, action, disabled = false) {
+  if (textContent === null) return;
+  const item = document.createElement('div');
+  item.className = 'context-menu-item';
+  if (action === 'clear') item.classList.add('danger');
+  item.textContent = textContent;
+  item.action = action;
+  if (disabled) item.classList.add('disabled');
+  menu.appendChild(item);
+}
+
+function showContextMenu(e, slot) {
+  e.preventDefault(); e.stopPropagation();
+  const m = contextMenu;
+  m.innerHTML = '';
+  m.slot = slot;
+
+  if (slot === 0) {
+    const hasData = vnaData.getSlot(0, 'S11').freqs.length > 0;
+    addMenuItem(m, '📏 Set to Live range', 'resetScale', !hasData);
+    addMenuItem(m, '💾 Export as S1P...', 'exportS1P', !hasData);
+    addMenuItem(m, '💾 Export as S2P...', 'exportS2P', !hasData);
+    addMenuItem(m, '📂 Load SnP...', 'loadSnP', false);
+  } else {
+    const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
+    addMenuItem(m, hasData ? '🔄 Resave Live here' : '💾 Save Live here', 'save', false);
+    addMenuItem(m, '🗑️ Clear slot', 'clear', !hasData);
+    addMenuItem(m, '📏 Set to this range', 'resetScale', !hasData);
+    addMenuItem(m, '💾 Export as S1P...', 'exportS1P', !hasData);
+    addMenuItem(m, '💾 Export as S2P...', 'exportS2P', !hasData);
+    addMenuItem(m, '📂 Load SnP...', 'loadSnP', false);
+  }
+  m.style.display = 'block';
+  m.style.left = e.pageX + 'px';
+  m.style.top = e.pageY + 'px';
+}
+
+function hideContextMenu() {
+  contextMenu.style.display = 'none';
+}
+
+const contextMenuActions = {
+  save: (slot) => {
+   if (slot > 0) {
+     graph.copySlot(0, slot);
+     updateTraceButton(slot);
+   }
+  },
+  clear: (slot) => {
+   if (slot > 0) {
+    graph.clearSlot(slot);
+    updateTraceButton(slot);
+   }
+  },
+  resetScale: (slot) => { graph.resetToRange(slot);},
+  exportS1P: (slot) => {
+   const content = vnaData.exportS1P(slot);
+   if (content) downloadFile(content, slot === 0 ? 'live.s1p' : `m${slot}.s1p`);
+  },
+  exportS2P: (slot) => {
+   const content = vnaData.exportS2P(slot);
+   if (content) downloadFile(content, slot === 0 ? 'live.s2p' : `m${slot}.s2p`);
+  },
+  loadSnP: (slot) => {
+   fileInput.slot = slot;
+   fileInput.value = '';
+   fileInput.click();
+  }
+};
+
+document.addEventListener('click', (e) => {
+  const menu = contextMenu;
+  if (!menu || !menu.contains(e.target)) {
+    if (menu && menu.style.display === 'block') menu.style.display = 'none';
+    return;
+  }
+  e.stopPropagation();
+  const menuItem = e.target.closest('.context-menu-item');
+  if (!menuItem || menuItem.classList.contains('disabled')) return;
+  const action = menuItem.action;
+  if (!action) return;
+  const handler = contextMenuActions[action];
+  hideContextMenu(); 
+  if (handler) handler(+menu.slot);
+});
+
+// ========================================================================
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ UI ===
+// ========================================================================
+function toggleTrace(slot) {
+  const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
+  if (!hasData) return;
+  graph.visibility[slot] = !graph.visibility[slot];
+  const btn = $('btnM' + slot);
+  if (btn) btn.classList.toggle('active', graph.visibility[slot]);
+  graph.redraw(true);
+}
+
+function updateTraceButton(slot) {
+  const btn = $('btnM' + slot);
+  if (!btn) return;
+  const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
+  const isVisible = graph.visibility[slot];
+  btn.classList.toggle('has-data', hasData);
+  btn.classList.toggle('active', hasData && isVisible);
+}
+
+function updateAllTraceButtons() { for (let i = 0; i < 5; i++) updateTraceButton(i); }
+
+function downloadFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function loadFile(e) {
+  const file = e.target.files[0];
+  const slot = e.target.slot;
+  if (!file || slot < 0) return;
+  const reader = new FileReader();
+  reader.onload = function(event) {
+  try {
+    const parsed = vnaData.parseSnP(event.target.result);
+    if (parsed.freqs.length > 0) {
+      vnaData.setSlotData(slot, parsed.freqs, parsed.S11, parsed.S21, parsed.S12, parsed.S22);
+      if (slot == 0) graph.resetToRange(slot);
+      graph.visibility[slot] = true;
+      updateTraceButton(slot);
+      graph.redraw(true);
+      updateMarkerTable();
+    }
+  } catch (err) {
+    console.error('Parse error:', err);
+    alert('Parse error');
+  }
+  };
+  reader.readAsText(file);
+}
+
+function loadTestData() {
+  const frequencies = [], S11 = [], S21 = [];
+  for (let i = 0; i < 10000; i++) {
+    const freq = 1e6 + i * 6e6/100;
+    frequencies.push(freq);
+    const resonance = 100e6, q = 50, detuning = (freq - resonance) / resonance;
+    const mag = 1 / Math.sqrt(1 + Math.pow(2 * q * detuning, 2));
+    const phase = -Math.atan(2 * q * detuning);
+    S11.push({ re: mag * Math.cos(phase), im: mag * Math.sin(phase) });
+    const cutoff = 500e6, ratio = freq / cutoff;
+    const mag21 = 1 / Math.sqrt(1 + Math.pow(ratio, 4));
+    const phase21 = -Math.atan(Math.pow(ratio, 2));
+    S21.push({ re: mag21 * Math.cos(phase21), im: mag21 * Math.sin(phase21) });
+  }
+  vnaData.setSlotData(0, frequencies, S11, S21);
+  graph.resetView();
+}
+
+// Copy / Download
+async function copyToClipboard() {
+  const blob = await new Promise(r => vnaCanvas.toBlob(r, 'image/png'));
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
+function addMarker() { graph.addMarker(); }
+function changeMarker() { graph.changeSelectedMarker(); }
+function removeMarker() { graph.removeSelectedMarker(); }
+
+function updateMarkerTable() {
+  markerTable.innerHTML = '';
+  graph.markers.forEach((marker, idx) => {
+    const tr = document.createElement('tr');
+    if (idx === graph.selectedMarkerIndex) tr.classList.add('selected');
+    tr.innerHTML = `<td style="width: 40px;">${idx + 1}</td><td>${formatFreqValue(marker.freq)}</td>`;
+    tr.addEventListener('click', () => { graph.selectMarker(idx); });
+    markerTable.appendChild(tr);
+  });
+}
+
+// === ГЕНЕРАЦИЯ ПАНЕЛЕЙ AREA ===
+function buildAreaPanels() {
+  areaPanels.innerHTML = '';
+  graph.areas.forEach((area, areaIdx) => {
+    if (!area.visible) return; 
+    const panel = document.createElement('div');
+    panel.className = 'area-panel';
+    panel.area = areaIdx;
+    // Позиционируем панель в верхней части region
+    const r = area.region;
+    panel.style.left = (r.leftPct * 100 + 1) + '%';
+    panel.style.top = (r.topPct * 100) + '%';
+    panel.style.width = ((r.rightPct - r.leftPct) * 100 - 2) + '%';
+    // Dropdown типа трассы (заполняем из TRACE_TYPES)
+    const sel = document.createElement('select');
+    sel.innerHTML = '';
+    for (const [type, def] of Object.entries(TRACE_TYPES)) {
+      const opt = document.createElement('option');
+      opt.value = type;
+      opt.textContent = def.name + (def.suffix ? ` (${def.suffix})` : '');
+      sel.appendChild(opt);
+    }
+    sel.value = area.trace.type;
+    sel.addEventListener('change', () => { area.setTraceType(sel.value); updateChannelCheckboxes(panel, area); graph.redraw(true); });
+    panel.appendChild(sel);
+
+    // Чекбоксы каналов
+    ['S11', 'S21', 'S12', 'S22'].forEach(ch => {
+      const lbl = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.channel = ch;
+      cb.addEventListener('change', () => {
+        const chObj = {};
+        panel.querySelectorAll('input[type=checkbox]').forEach(c => { chObj[c.channel] = c.checked; });
+        area.setChannels(chObj);
+        graph.redraw(true);
+      });
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(ch));
+      panel.appendChild(lbl);
+    });
+
+    // Кнопка сброса
+    const btnReset = document.createElement('button');
+    btnReset.textContent = '⟲';
+    btnReset.title = 'Reset scale';
+    btnReset.addEventListener('click', () => { area.resetView(graph.data); graph.redraw(true); });
+    panel.appendChild(btnReset);
+
+    // Кнопка автомасштаба (заглушка)
+    const btnAuto = document.createElement('button');
+    btnAuto.textContent = '⟳';
+    btnAuto.title = 'Auto scale (soon)';
+    btnAuto.disabled = true;
+    panel.appendChild(btnAuto);
+    areaPanels.appendChild(panel);
+    updateChannelCheckboxes(panel, area);
+  });
+}
+
+function updateChannelCheckboxes(panel, area) {
+  const typeDef = TRACE_TYPES[area.trace.type];
+  const available = typeDef ? typeDef.channels : [];
+  const active = area.trace.channels;
+
+  panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+   const isAvailable = available.includes(cb.channel); // 'S11', 'S21', 'S12', 'S22'
+   cb.disabled = !isAvailable;
+   cb.checked = isAvailable && active.includes(cb.channel);
+  });
+}
+
+const LAYOUT_PRESETS = [
+  { name: '1: ◻', regions: [[0, 0, 1, 1]] },
+  { name: '2: ◫', regions: [[0, 0, 0.5, 1], [0.5, 0, 1, 1]] },
+  { name: '2: ▤', regions: [[0, 0, 1, 0.5], [0, 0.5, 1, 1]] },
+  { name: '3: ◰', regions: [[0, 0, 0.5, 1], [0.5, 0, 1, 0.5], [0.5, 0.5, 1, 1]] },
+  { name: '3: ◳', regions: [[0, 0, 0.5, 0.5], [0, 0.5, 0.5, 1], [0.5, 0, 1, 1]] },
+  { name: '3: ▤', regions: [[0, 0, 1, 0.333], [0, 0.333, 1, 0.666], [0, 0.666, 1, 1]] },
+  { name: '4: ⊞', regions: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] }
+];
+
+// Функция-адаптер: преобразует [l, t, r, b] в объект region
+function getRegions(id) {
+  const preset = LAYOUT_PRESETS[id];
+  if (!preset) return [];
+  return preset.regions.map(r => ({ leftPct: r[0], topPct: r[1], rightPct: r[2], bottomPct: r[3] }));
+}
+
+function initLayouts() {
+  layoutSelect.innerHTML = '';
+  LAYOUT_PRESETS.forEach((layout, index) => {
+    const opt = document.createElement('option');
+    opt.value = index;
+    opt.textContent = layout.name;
+    layoutSelect.appendChild(opt);
+  });
+  const id = localStorage.getItem('vna-layout') || 0;
+  layoutSelect.value = id;
+  changeLayout(id);
+}
+
+function changeLayout(layoutId) {
+  const regionsArray = getRegions(layoutId);
+  if (!regionsArray) return;
+  localStorage.setItem('vna-layout', layoutId);
+  graph.setRegions(regionsArray); // Передаем именно МАССИВ объектов
+  buildAreaPanels();
+}
+
+// ========================================================================
+// === ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ===
+// ========================================================================
+// 1. Инициализация
+function main() {
+  vnaData = new VNAData();
+  graph = new VNAGraph('vnaCanvas', vnaData);
+
+  // 2. UI
+  initThemes();
+  graph.updateColors()
+
+  // 3. Данные и отрисовка (строго в этом порядке!)
+  initLayouts();
+  loadTestData();
+  graph.resetView();
+  updateAllTraceButtons();
+  updateMarkerTable();
+
+  // 4. События
+  window.addEventListener('resize', () => {graph.resize();});
+  fileInput.addEventListener('change', loadFile);
+}
+
+document.addEventListener('DOMContentLoaded', main);
+
+</script>
+</body>
+</html>
