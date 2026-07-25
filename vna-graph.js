@@ -5,7 +5,7 @@ const GRAPH_CONST = {
  TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
  TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
  MARKER_DASH: [4, 4], CURSOR_DASH: [5, 5], GRID_DASH: [3, 3],
- ZOOM_IN_FACTOR: 0.95, ZOOM_OUT_FACTOR: 1.05,
+ ZOOM_FACTOR: 0.05,
  MARKER_PICKUP_RADIUS: 16
 };
 
@@ -133,12 +133,18 @@ calculatePoints(data, globalVisibility) {
 }
 
 getMouseArea(x, y) {
-  const { left, right, top, bottom } = this.bounds;
+  const { left, right, top, bottom, width, height } = this.bounds;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
-  if (x < left   && x > left   - GRAPH_CONST.AREA.left   && inV) return 'y';
-  if (y > bottom && y < bottom + GRAPH_CONST.AREA.bottom && inH) return 'x';
-  if (inH && inV) return 'plot';
+  if (x < left && x > left - GRAPH_CONST.AREA.left && inV) {
+    const rel = (y - top) / height;
+    return { zone: 'y', min: rel > 1/3, max: rel < 2/3, cursor: 'ns-resize' };
+  }
+  if (y > bottom && y < bottom + GRAPH_CONST.AREA.bottom && inH) {
+    const rel = (x - left) / width;
+    return { zone: 'x', min: rel < 2/3, max: rel > 1/3, cursor: 'ew-resize' };
+  }
+  if (inH && inV) return { zone: 'plot', cursor: 'crosshair' };
   return null;
 }
 
@@ -336,7 +342,8 @@ _drawMarkerOnTraces(ctx, graph, marker, markerIndex, activeColor, inactiveColor,
 drawCursorInfo(ctx, graph) {
   if (this.rad) return;
   const { mouse } = graph;
-  if (this.getMouseArea(mouse.x, mouse.y) !== 'plot') return false;
+  const info = this.getMouseArea(mouse.x, mouse.y);
+  if (!info || info.zone !== 'plot') return false;
   const { bounds, view } = this;
   const cursorFreq = view.xMin + (mouse.x - bounds.left) / bounds.width * (view.xMax - view.xMin);
 
@@ -402,9 +409,18 @@ setupEventHandlers() {
   this._boundOnMouseMove = (e) => this.onMouseMove(e);
   this._boundOnMouseUp = () => this.onMouseUp();
   this._boundOnWheel = (e) => this.onWheel(e);
+  this._boundOnTouchStart = (e) => this.onTouchStart(e);
+  this._boundOnTouchMove = (e) => this.onTouchMove(e);
+  this._boundOnTouchEnd = (e) => this.onTouchEnd(e);
 
   this.canvas.addEventListener('mousedown', this._boundOnMouseDown);
-  this.canvas.addEventListener('wheel', this._boundOnWheel);
+  this.canvas.addEventListener('wheel', this._boundOnWheel, { passive: false });
+
+  this.canvas.addEventListener('touchstart', this._boundOnTouchStart, { passive: false });
+  this.canvas.addEventListener('touchmove', this._boundOnTouchMove, { passive: false });
+  this.canvas.addEventListener('touchend', this._boundOnTouchEnd);
+  this.canvas.addEventListener('touchcancel', this._boundOnTouchEnd);
+
   window.addEventListener('mousemove', this._boundOnMouseMove);
   window.addEventListener('mouseup', this._boundOnMouseUp);
 }
@@ -561,8 +577,11 @@ onMouseDown(e) {
   this.mouse.handler = null;
 }
 
+onMouseUp() { if (this.mouse.handler) { this.mouse.handler('release', this.mouse.x, this.mouse.y); this.mouse.handler = null; } }
+
 _tryRegisterMarkerDrag(area, x, y) {
-  if (area.getMouseArea(x, y) !== 'plot') return false;
+  const info = area.getMouseArea(x, y);
+  if (!info || info.zone !== 'plot') return false;
   let minDist = GRAPH_CONST.MARKER_PICKUP_RADIUS, foundIdx = -1;
   const { bounds, view } = area;
   for (let i = 0; i < this.markers.length; i++) {
@@ -597,35 +616,41 @@ _markerDragHandler(action, area, x, y) {
   return true;
 }
 
+applyAxisDelta(area, info, delta) {
+    if (!area || !info.zone) return;
+    const { view } = area;
+    if (info.zone === 'x') {
+        if (info.min && view.xMin < delta) { delta = view.xMin;}
+        if (info.min) view.xMin -= delta; 
+        if (info.max) view.xMax -= delta;
+    } else if (info.zone === 'y') {
+        if (info.min) view.yMin -= delta;
+        if (info.max) view.yMax -= delta;
+    }
+    this.redraw(true);
+}
+
 _tryRegisterAxisDrag(area, x, y) {
-  const axis = area.getMouseArea(x, y);
-  if (!axis || axis === 'plot') return false;
+  const info = area.getMouseArea(x, y);
+  if (info?.zone === 'plot') return false;
   this.mouse.handler = (action, mx, my) => this._axisDragHandler(action, area, mx, my);
-  this.mouse.handlerData = { area, axis, startX: x, startY: y, viewStart: { xMin: area.view.xMin, xMax: area.view.xMax, yMin: area.view.yMin, yMax: area.view.yMax } };
-  this.canvas.style.cursor = axis === 'y' ? 'ns-resize' : 'ew-resize';
+  this.mouse.handlerData = { area, info, lastX: x, lastY: y};
+  this.canvas.style.cursor = (info.min && info.max) ? 'grabbing' : info.cursor;
   return true;
 }
 
 _axisDragHandler(action, area, x, y) {
   if (action === 'drag') {
-    const { axis, startX, startY, viewStart } = this.mouse.handlerData;
+    const { info, lastX, lastY } = this.mouse.handlerData;
     const { bounds, view } = area;
-    const dx = x - startX, dy = y - startY;
-    if (axis === 'x') {
-      const xRange = viewStart.xMax - viewStart.xMin;
-      view.xMin = viewStart.xMin - dx / bounds.width * xRange;
-      view.xMax = viewStart.xMax - dx / bounds.width * xRange;
-      area.clampXView();
-    } else if (axis === 'y') {
-      const yRange = viewStart.yMax - viewStart.yMin;
-      view.yMin = viewStart.yMin + dy / bounds.height * yRange;
-      view.yMax = viewStart.yMax + dy / bounds.height * yRange;
-    }
-    this.redraw(true);
+    const delta = info.zone === 'x' ? (x - lastX) * (view.xMax - view.xMin) / bounds.width : (lastY - y) * (view.yMax - view.yMin) / bounds.height;
+    this.applyAxisDelta(area, info, delta);
+    this.mouse.handlerData.lastX = x;
+    this.mouse.handlerData.lastY = y;
   } else if (action === 'release') {
-    this.mouse.handlerData = null; this.canvas.style.cursor = 'crosshair';
+    this.mouse.handlerData = null;
+    this.canvas.style.cursor = 'crosshair';
   }
-  return true;
 }
 
 onMouseMove(e) {
@@ -633,41 +658,52 @@ onMouseMove(e) {
   this.mouse.x = x; this.mouse.y = y;
   if (this.mouse.handler) { this.mouse.handler('drag', x, y); return; }
   const { width, height } = this.canvas.getBoundingClientRect();
-  if (x < 0 || y < 0 || x > width || y > height) { this.canvas.style.cursor = 'crosshair'; return; }
   let cursor = 'crosshair';
-  for (const area of this.areas) {
-    const axis = area.getMouseArea(x, y);
-    if (axis === 'y') { cursor = 'ns-resize'; break; }
-    if (axis === 'x') { cursor = 'ew-resize'; break; }
-  }
+  if (x >= 0 && x < width && y >= 0 && y <  height) {
+    for (const area of this.areas) {
+      const info = area.getMouseArea(x, y);
+      if (info && info.zone !== 'plot') { cursor = (info.min && info.max) ? 'grabbing' : info.cursor; break; }
+    }
+  } 
   this.canvas.style.cursor = cursor;
   this.redraw(false);
 }
 
-onMouseUp() { if (this.mouse.handler) { this.mouse.handler('release', this.mouse.x, this.mouse.y); this.mouse.handler = null; } }
-
 onWheel(e) {
   e.preventDefault();
-  const { x: mx, y: my } = this.getMouseCoords(e);
-  const activeArea = this.areas.find(a => a.getMouseArea(mx, my) !== null);
-  if (!activeArea) return;
-  const mouseArea = activeArea.getMouseArea(mx, my);
-  const factor = e.deltaY > 0 ? GRAPH_CONST.ZOOM_OUT_FACTOR : GRAPH_CONST.ZOOM_IN_FACTOR;
-  const { bounds, view } = activeArea;
-  if (mouseArea === 'x') {
-    const xRange = view.xMax - view.xMin;
-    const xAt = view.xMin + (mx - bounds.left) / bounds.width * xRange;
-    const nr = xRange * factor;
-    const r = (xAt - view.xMin) / xRange;
-    view.xMin = xAt - r * nr; view.xMax = xAt + (1 - r) * nr;
-    activeArea.clampXView();
-  } else if (mouseArea === 'y') {
-    const yRange = view.yMax - view.yMin;
-    const yAt = view.yMax - (my - bounds.top) / bounds.height * yRange;
-    const nr = yRange * factor;
-    const r = (view.yMax - yAt) / yRange;
-    view.yMin = yAt - (1 - r) * nr; view.yMax = yAt + r * nr;
-  }
-  this.redraw(true);
+  const { x, y } = this.getMouseCoords(e);
+  const area = this.areas.find(a => {
+    const info = a.getMouseArea(x, y);
+    return info && info.zone !== 'plot';
+  });
+  if (!area) return;
+  const info = area.getMouseArea(x, y);
+  const range = info.zone === 'x' ? area.view.xMax - area.view.xMin : area.view.yMax - area.view.yMin;
+  const delta = range * GRAPH_CONST.ZOOM_FACTOR;
+  this.applyAxisDelta(area, info, e.deltaY > 0 ? delta : -delta);
 }
+
+// Touch handlers emulate mouse
+touchToMouse(e) {
+  e.preventDefault();
+  if (e.touches.length !== 1) return null;
+  return e.touches[0];
+}
+
+onTouchStart(e) {
+  const t = this.touchToMouse(e);
+  if (t) this.onMouseDown(t);
+}
+
+onTouchMove(e) {
+  const t = this.touchToMouse(e);
+  if (t) this.onMouseMove(t);
+}
+
+onTouchEnd(e) {
+  e.preventDefault();
+  this.onMouseUp();
+  this.onMouseMove({ clientX: -10, clientY: -10});
+}
+
 }

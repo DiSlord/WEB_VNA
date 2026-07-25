@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>VNA Graph Viewer</title>
-    <link rel="stylesheet" href="vna_styles.css">
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+ <title>VNA Graph Viewer</title>
+ <link rel="stylesheet" href="vna_styles.css">
 </head>
 <body>
 <div class="container">
@@ -49,10 +50,10 @@
  <div class="main-area">
    <div class="top-bar">
     <div class="bar-row">
-     <button onclick="copyToClipboard()">📋 Copy</button>
+     <button id="btn_copy" onclick="copyToClipboard()">📋Copy</button>
      <label>Tiling:</label><select id="layoutSelect" onchange="changeLayout(this.value)"></select>
     </div>
-    <div class="bar-row"><label>Theme:</label><select id="themeSelect" onchange="changeTheme(this.value)"></select></div>
+    <div class="bar-row"><label>Theme:</label><select id="themeSelect" onchange="changeTheme(this.value)"></select><button onclick="toggleFullscreen()">⛶</button></div>
    </div>
    <div class="graph-container">
     <div class="area-panels" id="areaPanels"></div>
@@ -103,20 +104,6 @@ const themes = {
  '--success': ['#69d97a', '#008a00', '#00c000', '#2d8a1f', '#0d7a2e', '#9ad07a', '#4ad8a8'],
  '--error': ['#ff6b85', '#b81c1c', '#b8201a', '#b80d2e', '#c1271d', '#e45a4a', '#ff5a6e'],
  '--warn': ['#ffd866', '#d46a00', '#b57f00', '#c47d00', '#e69500', '#e4b557', '#f0a040'],
-/*
- '--trace-m0-s11': ['#ffff00', '#ff0000', '#076678', '#1e66f5', '#0d5bc4', '#4a8db8', '#ffff00'],
- '--trace-m0-s12': ['#0080ff', '#0050b0', '#9d0006', '#d20f39', '#c1271d', '#e45a4a', '#0080ff'],
- '--trace-m0-s21': ['#00ffff', '#00b0b0', '#9d0006', '#d20f39', '#c1271d', '#e45a4a', '#00ffff'],
- '--trace-m0-s22': ['#ff8000', '#ff8000', '#076678', '#1e66f5', '#0d5bc4', '#4a8db8', '#ff8000'],
- '--trace-m1-s11': ['#00ff00', '#008855', '#689d6a', '#40a02b', '#188038', '#9ad07a', '#4ad8a8'],
- '--trace-m1-s21': ['#ff00ff', '#cc5500', '#d65d0e', '#fe640b', '#f9ab00', '#d48a3a', '#e0a040'],
- '--trace-m2-s11': ['#00ffff', '#7722cc', '#8f3f71', '#8839ef', '#9334e6', '#a86bd4', '#a855f7'],
- '--trace-m2-s21': ['#ff0000', '#ccaa00', '#b57f00', '#c47d00', '#e69500', '#e4b557', '#f0a040'],
- '--trace-m3-s11': ['#00ffcc', '#cc0066', '#b16286', '#d20f39', '#c1271d', '#e45a4a', '#ff5a6e'],
- '--trace-m3-s21': ['#ccff00', '#00cc99', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
- '--trace-m4-s11': ['#ff6600', '#cc4400', '#d65d0e', '#fe640b', '#f9ab00', '#d48a3a', '#e0a040'],
- '--trace-m4-s21': ['#44aaff', '#2288cc', '#458588', '#1e66f5', '#1a73e8', '#4a8db8', '#3a7bd4'],
-*/
 
  '--trace-m0-s11': ['#ffff00', '#e5c07b', '#fabd2f', '#df8e1d', '#e5c890', '#eed49f', '#b58900'],
  '--trace-m0-s21': ['#00ffff', '#56b6c2', '#83a598', '#179299', '#81c8be', '#8bd5ca', '#2aa198'],
@@ -176,6 +163,11 @@ function initThemes() {
 function changeTheme(index) {
   applyTheme(parseInt(index));
   graph.redraw();
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => {console.log(`Fullscreen error: ${err.message}`); });
+  else document.exitFullscreen();
 }
 
 // ========================================================================

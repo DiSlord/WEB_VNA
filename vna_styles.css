@@ -78,14 +78,17 @@
  margin: 0;
  padding: 0;
  box-sizing: border-box;
+ user-select: none;
+ -webkit-user-select: none;
+ -webkit-touch-callout: none;
 }
 
 body {
  font: var(--font-ui);
  background: var(--bg);
  color: var(--text);
- height: 100vh;
- width: 100vw;
+ height: 100dvh;
+ width: 100dvw;
  overflow: hidden;
  display: flex;
 }

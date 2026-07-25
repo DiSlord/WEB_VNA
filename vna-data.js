@@ -113,10 +113,10 @@ parseSnP(text) {
       else format = 'RI';
       continue;
     }
-    const nums = line.split(/\s+/).map(Number);
+    const nums = line.replace(/,/g, '.').split(/\s+/).map(Number);
     if (nums.length < 3 || isNaN(nums[0])) continue; 
     freqs.push(nums[0] * freqMult);
-    S11.push(toComplex(+nums[1], +nums[2], format));
+    S11.push(toComplex(nums[1], nums[2], format));
     S21.push(nums.length > 4 ? toComplex(nums[3], nums[4], format) : { re: 0, im: 0 });
     S12.push(nums.length > 6 ? toComplex(nums[5], nums[6], format) : { re: 0, im: 0 });
     S22.push(nums.length > 8 ? toComplex(nums[7], nums[8], format) : { re: 0, im: 0 });
