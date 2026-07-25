@@ -132,19 +132,30 @@ calculatePoints(data, globalVisibility) {
   }
 }
 
-getMouseArea(x, y) {
+getMouseArea(x, y, markers = []) {
   const { left, right, top, bottom, width, height } = this.bounds;
+  const { xMin, xMax, yMin, yMax } = this.view;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
+  if (this.rad) return { zone: 'plot', cursor: 'crosshair' };;
   if (x < left && x > left - GRAPH_CONST.AREA.left && inV) {
-    const rel = (y - top) / height;
-    return { zone: 'y', min: rel > 1/3, max: rel < 2/3, cursor: 'ns-resize' };
+    const rel = 3 * (y - top) / height;
+    const min = rel > 1, max = rel < 2;
+    return { zone: 'y', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ns-resize' };
   }
   if (y > bottom && y < bottom + GRAPH_CONST.AREA.bottom && inH) {
-    const rel = (x - left) / width;
-    return { zone: 'x', min: rel < 2/3, max: rel > 1/3, cursor: 'ew-resize' };
+    const rel = 3 * (x - left) / width;
+    const min = rel < 2, max = rel > 1;
+    return { zone: 'x', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ew-resize' };
   }
-  if (inH && inV) return { zone: 'plot', cursor: 'crosshair' };
+  if (inH && inV) {
+    for (let i = 0; i < markers.length && !this.rad; i++) {
+      const marker = markers[i];
+      const dx = Math.abs(x - left - (marker.freq - xMin) * width / (xMax - xMin));
+      if (dx < GRAPH_CONST.MARKER_PICKUP_RADIUS) return { zone: 'marker', index: i, dist: dx, cursor: 'grabbing' };
+    }  
+    return { zone: 'plot', cursor: 'crosshair' };
+  }
   return null;
 }
 
@@ -182,7 +193,7 @@ drawGrid(ctx, graph) {
   for (const freq of xTicks.ticks) {
     const x = left + (freq - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
-    ctx.fillText(formatFreqValue(freq, 3), x, bottom + 15);
+    ctx.fillText(formatFreqValue(freq, 3), x, bottom + 18);
   }
 
   const trace = this.trace;
@@ -248,12 +259,12 @@ drawTraces(ctx, graph) {
   const { left, top, width, height } = this.bounds;
   const plotRect = { left, top, width, height };
 
-  for (let slot = 0; slot < 5; slot++) {
-    if (!graph.visibility[slot]) continue;
+  graph.visibility.forEach((visible, slot) => {
+    if (!visible) return;
     const trace = this.trace;
     for (const channel of trace.channels) {
       const points = this.cachedPoints[slot][channel];
-      if (!points || points.length === 0) continue;
+      if (!points || points.length === 0) return;
       ctx.strokeStyle = graph.getTraceColor(`m${slot}`, channel);
       ctx.lineWidth = slot === 0 ? TRACE_LIVE_LINE : TRACE_STORED_LINE;
       ctx.beginPath(); let drawing = false;
@@ -267,42 +278,35 @@ drawTraces(ctx, graph) {
       }
       ctx.stroke();
     }
-  }
+  });
 }
 
 drawMarkers(ctx, graph) {
   const { bounds, view } = this;
   const activeColor = graph.getCSSColor('--marker-active'), inactiveColor = graph.getCSSColor('--marker-inactive');
   ctx.font = graph.getFont('marker');
-  for (let i = 0; i < graph.markers.length; i++) {
-    const marker = graph.markers[i];
+  graph.markers.forEach((marker, i) => {
     let markerX = bounds.left + (marker.freq - view.xMin) / (view.xMax - view.xMin) * bounds.width;
-    if (markerX < bounds.left || markerX > bounds.right) continue;
+    if (markerX < bounds.left || markerX > bounds.right) return;
     const isSelected = (i === graph.selectedMarkerIndex);
-    const isDragging = graph.mouse.handlerData?.area === this && graph.mouse.handlerData?.index === i;
-    const isHighlighted = isSelected || isDragging;
     if (!this.rad) {
       markerX = Math.round(markerX) + 0.5;
       ctx.setLineDash(GRAPH_CONST.MARKER_DASH);
-      ctx.strokeStyle = isHighlighted ? activeColor : inactiveColor;
-      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.strokeStyle = isSelected ? activeColor : inactiveColor;
+      ctx.lineWidth = isSelected ? 2 : 1;
       this.drawLine(ctx, markerX, bounds.top, markerX, bounds.bottom);
       ctx.setLineDash([]);
     }
-    this._drawMarkerOnTraces(ctx, graph, marker, i, activeColor, inactiveColor, isHighlighted);
-  }
+    this._drawMarkerOnTraces(ctx, graph, marker, i, activeColor, inactiveColor, isSelected);
+  });
 }
 
 drawTextWithOutline(ctx, text, x, y, fillColor, outlineColor, lineWidth = 3) {
-    ctx.lineJoin = 'round';       // Красивые углы обводки
+    ctx.lineJoin = 'round';
     ctx.miterLimit = 2;
     ctx.lineWidth = lineWidth;
-    
-    // 1. Сначала обводка цветом фона
     ctx.strokeStyle = outlineColor;
     ctx.strokeText(text, x, y);
-    
-    // 2. Затем сам текст основным цветом
     ctx.fillStyle = fillColor;
     ctx.fillText(text, x, y);
 }
@@ -310,14 +314,14 @@ drawTextWithOutline(ctx, text, x, y, fillColor, outlineColor, lineWidth = 3) {
 _drawMarkerOnTraces(ctx, graph, marker, markerIndex, activeColor, inactiveColor, isHighlighted) {
   const markerOutline = graph.getCSSColor('--bg'), markerLabel = graph.getCSSColor('--marker-label');
   const { MARKER_DOT_RADIUS, MARKER_SEL_DOT_RADIUS } = GRAPH_CONST;
-  for (let slot = 0; slot < 5; slot++) {
-    if (!graph.visibility[slot]) continue;
+  graph.visibility.forEach((visible, slot) => {
+    if (!visible) return;
     const trace = this.trace;
     for (const channel of trace.channels) {
       const points = this.cachedPoints[slot][channel];
-      if (!points || points.length < 2) continue;
+      if (!points || points.length < 2) return;
       const interp = interpolatePoint(points, marker.freq);
-      if (!interp) continue;
+      if (!interp) return;
       ctx.fillStyle = isHighlighted ? activeColor : inactiveColor;
       ctx.beginPath(); ctx.arc(interp.x, interp.y, isHighlighted ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
       ctx.strokeStyle = markerLabel; ctx.lineWidth = isHighlighted ? 2 : 1; ctx.stroke();
@@ -336,7 +340,7 @@ _drawMarkerOnTraces(ctx, graph, marker, markerIndex, activeColor, inactiveColor,
  //   ctx.fillText(`M${markerIndex + 1}: ${valText}`, interp.x + 8, interp.y + 4);
       this.drawTextWithOutline(ctx, `M${markerIndex + 1}: ${valText}`, interp.x + 8, interp.y + 4, markerLabel, markerOutline);
     }
-  }
+  });
 }
 
 drawCursorInfo(ctx, graph) {
@@ -354,15 +358,14 @@ drawCursorInfo(ctx, graph) {
   ctx.setLineDash([]);
 
   const infoLines = [`Freq: ${formatFreqValue(cursorFreq)}`];
-  for (let slot = 0; slot < 5; slot++) {
-    if (!graph.visibility[slot]) continue;
+  graph.visibility.forEach((visible, slot) => {
+    if (!visible) return;
     const trace = this.trace;
     for (const channel of trace.channels) {
       const points = this.cachedPoints[slot][channel];
-      if (!points || points.length < 2) continue;
-
+      if (!points || points.length < 2) return;
       const interp = interpolatePoint(points, cursorFreq);
-      if (!interp) continue;
+      if (!interp) return;
 
       ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel);
       ctx.beginPath(); ctx.arc(mouse.x, interp.y, GRAPH_CONST.CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
@@ -370,7 +373,7 @@ drawCursorInfo(ctx, graph) {
       const typeDef = TRACE_TYPES[this.trace.type];
       infoLines.push(`${slotName}: ${formatValue(interp.value, typeDef)}`);
     }
-  }
+  });
   graph.drawTooltip(mouse.x, mouse.y, infoLines);
   return true;
 }
@@ -430,8 +433,7 @@ getCSSColor(varName, fallback) { return this.colors[varName] ?? fallback ?? CSS_
 getTraceColor(slot, channel) { return this.getCSSColor(`--trace-${slot}-${channel.toLowerCase()}`, '#888888'); }
 
 setRegions(regions) {
-  for (let i = 0; i < this.areas.length; i++)
-     this.areas[i].region = regions[i] || { leftPct: 0, rightPct: 0, topPct: 0, bottomPct: 0 };
+  this.areas.forEach((area, i) => { area.region = regions[i] || { leftPct: 0, rightPct: 0, topPct: 0, bottomPct: 0 }; });
   this.resize();
 }
 
@@ -448,15 +450,19 @@ clearSlot(slot) {
   this.redraw(true);
 }
 
+setRange(start, stop) {
+  for (const area of this.areas) area.setRange(start, stop);
+  this.redraw(true);
+  updateFreqInputs();
+}
+
 resetToRange(slot) {
   const f = this.data.getSlot(slot, 'S11').freqs;
   if (f.length === 0) return;
-  for (const area of this.areas) area.setRange(f[0], f[f.length - 1]);
-  this.redraw(true);
+  this.setRange(f[0], f[f.length - 1]);
 }
 
 resetView() { for (const area of this.areas) area.resetView(this.data); this.redraw(true); }
-
 
 updateColors() {
   const style = getComputedStyle(document.documentElement);
@@ -536,19 +542,19 @@ addMarker() {
   this.markers.push({ freq: Math.round(freq) });
   this.selectedMarkerIndex = this.markers.length - 1;
   this.redraw();
-  if (typeof updateMarkerTable === 'function') updateMarkerTable();
+  updateMarkerTable();
 }
 
 changeSelectedMarker() {
   if (this.selectedMarkerIndex < 0 || this.selectedMarkerIndex >= this.markers.length) return;
   const marker = this.markers[this.selectedMarkerIndex];
-  const input = prompt(`Введите частоту для маркера M${this.selectedMarkerIndex + 1}:`, formatFreqValue(marker.freq));
+  const input = prompt(`Введите частоту для маркера M${this.selectedMarkerIndex + 1}:`, marker.freq);
   if (input === null) return;
-  const newFreq = +input;
+  const newFreq = getValue(input);
   if (isNaN(newFreq) || newFreq < 0) return;
   marker.freq = Math.round(newFreq);
   this.redraw();
-  if (typeof updateMarkerTable === 'function') updateMarkerTable();
+  updateMarkerTable();
 }
 
 removeSelectedMarker() {
@@ -556,50 +562,30 @@ removeSelectedMarker() {
   this.markers.splice(this.selectedMarkerIndex, 1);
   this.selectedMarkerIndex = this.markers.length > 0 ? Math.min(this.selectedMarkerIndex, this.markers.length - 1) : -1;
   this.redraw();
-  if (typeof updateMarkerTable === 'function') updateMarkerTable();
+  updateMarkerTable();
 }
 
 selectMarker(index) {
-  if (index < 0 || index >= this.markers.length) return;
+  if (this.selectedMarkerIndex === index) return;
   this.selectedMarkerIndex = index;
   this.redraw();
-  if (typeof updateMarkerTable === 'function') updateMarkerTable();
+  updateMarkerTable();
 }
 
-getMouseCoords(e) { const rect = this.canvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; }
-
-onMouseDown(e) {
-  const { x, y } = this.getMouseCoords(e);
-  const activeArea = this.areas.find(a => a.getMouseArea(x, y) !== null);
-  if (!activeArea) return;
-  if (this._tryRegisterMarkerDrag(activeArea, x, y)) return;
-  if (this._tryRegisterAxisDrag(activeArea, x, y)) return;
-  this.mouse.handler = null;
-}
-
-onMouseUp() { if (this.mouse.handler) { this.mouse.handler('release', this.mouse.x, this.mouse.y); this.mouse.handler = null; } }
-
-_tryRegisterMarkerDrag(area, x, y) {
-  const info = area.getMouseArea(x, y);
-  if (!info || info.zone !== 'plot') return false;
-  let minDist = GRAPH_CONST.MARKER_PICKUP_RADIUS, foundIdx = -1;
-  const { bounds, view } = area;
-  for (let i = 0; i < this.markers.length; i++) {
-    const markerX = bounds.left + (this.markers[i].freq - view.xMin) / (view.xMax - view.xMin) * bounds.width;
-    if (markerX < bounds.left || markerX > bounds.right) continue;
-    const dx = Math.abs(x - markerX);
-    if (dx < minDist) { minDist = dx; foundIdx = i; }
+_tryRegisterDrag(area, info, x, y) {
+  this.selectMarker(info.zone === 'marker' ? info.index : -1);
+  if (info.zone === 'marker') {
+    this.mouse.handler = (action, mx, my) => this._markerDragHandler(action, area, mx, my);
+    this.mouse.handlerData = { area, index: info.index };
+    this.canvas.style.cursor = info.cursor;
+    return true;
+  } else if (info.zone === 'x' || info.zone === 'y') {
+    this.mouse.handler = (action, mx, my) => this._axisDragHandler(action, area, mx, my);
+    this.mouse.handlerData = { area, info, lastX: x, lastY: y};
+    this.canvas.style.cursor = info.cursor;
+    return true;
   }
-  if (foundIdx != this.selectedMarkerIndex) {
-    this.selectedMarkerIndex = foundIdx;
-    if (typeof updateMarkerTable === 'function') updateMarkerTable();
-    this.redraw();
-  }
-  if (foundIdx < 0) return false;
-  this.mouse.handler = (action, mx, my) => this._markerDragHandler(action, area, mx, my);
-  this.mouse.handlerData = { area, index: foundIdx };
-  this.canvas.style.cursor = 'ew-resize';
-  return true;
+  return false;
 }
 
 _markerDragHandler(action, area, x, y) {
@@ -608,10 +594,8 @@ _markerDragHandler(action, area, x, y) {
     let freq = view.xMin + (x - bounds.left) / bounds.width * (view.xMax - view.xMin);
     if (freq < view.xMin) freq = view.xMin; if (freq > view.xMax) freq = view.xMax;
     this.markers[this.mouse.handlerData.index].freq = Math.round(freq);
-    if (typeof updateMarkerTable === 'function') updateMarkerTable();
+    updateMarkerTable();
     this.redraw();
-  } else if (action === 'release') {
-    this.mouse.handlerData = null; this.canvas.style.cursor = 'crosshair';
   }
   return true;
 }
@@ -630,15 +614,6 @@ applyAxisDelta(area, info, delta) {
     this.redraw(true);
 }
 
-_tryRegisterAxisDrag(area, x, y) {
-  const info = area.getMouseArea(x, y);
-  if (info?.zone === 'plot') return false;
-  this.mouse.handler = (action, mx, my) => this._axisDragHandler(action, area, mx, my);
-  this.mouse.handlerData = { area, info, lastX: x, lastY: y};
-  this.canvas.style.cursor = (info.min && info.max) ? 'grabbing' : info.cursor;
-  return true;
-}
-
 _axisDragHandler(action, area, x, y) {
   if (action === 'drag') {
     const { info, lastX, lastY } = this.mouse.handlerData;
@@ -647,9 +622,18 @@ _axisDragHandler(action, area, x, y) {
     this.applyAxisDelta(area, info, delta);
     this.mouse.handlerData.lastX = x;
     this.mouse.handlerData.lastY = y;
-  } else if (action === 'release') {
-    this.mouse.handlerData = null;
-    this.canvas.style.cursor = 'crosshair';
+  }
+}
+
+// Mouse and touch handlers
+getMouseCoords(e) { const rect = this.canvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; }
+onMouseUp() { if (this.mouse.handler) { this.mouse.handler('release', this.mouse.x, this.mouse.y); this.mouse.handler = null; } }
+onMouseDown(e) {
+  const { x, y } = this.getMouseCoords(e);
+  this.mouse.handler = null;
+  for (const area of this.areas) {
+    const info = area.getMouseArea(x, y, this.markers);
+    if (info && this._tryRegisterDrag(area, info, x, y)) return;
   }
 }
 
@@ -658,29 +642,26 @@ onMouseMove(e) {
   this.mouse.x = x; this.mouse.y = y;
   if (this.mouse.handler) { this.mouse.handler('drag', x, y); return; }
   const { width, height } = this.canvas.getBoundingClientRect();
-  let cursor = 'crosshair';
-  if (x >= 0 && x < width && y >= 0 && y <  height) {
-    for (const area of this.areas) {
-      const info = area.getMouseArea(x, y);
-      if (info && info.zone !== 'plot') { cursor = (info.min && info.max) ? 'grabbing' : info.cursor; break; }
-    }
-  } 
-  this.canvas.style.cursor = cursor;
+  if (x < 0 || x >= width || y < 0 || y >= height) return;
+  let cursor = 'crosshair'; 
+  for (const area of this.areas) {
+    const info = area.getMouseArea(x, y, this.markers);
+    if (info) { cursor = info.cursor; break; }
+  }
   this.redraw(false);
+  this.canvas.style.cursor = cursor;
 }
 
 onWheel(e) {
   e.preventDefault();
   const { x, y } = this.getMouseCoords(e);
-  const area = this.areas.find(a => {
-    const info = a.getMouseArea(x, y);
-    return info && info.zone !== 'plot';
-  });
-  if (!area) return;
-  const info = area.getMouseArea(x, y);
-  const range = info.zone === 'x' ? area.view.xMax - area.view.xMin : area.view.yMax - area.view.yMin;
-  const delta = range * GRAPH_CONST.ZOOM_FACTOR;
-  this.applyAxisDelta(area, info, e.deltaY > 0 ? delta : -delta);
+  for (const area of this.areas) {
+    const info = area.getMouseArea(x, y);
+    if (!info || info.zone === 'plot') continue;
+    const range = info.zone === 'x' ? area.view.xMax - area.view.xMin : area.view.yMax - area.view.yMin;
+    const delta = range * GRAPH_CONST.ZOOM_FACTOR;
+    this.applyAxisDelta(area, info, e.deltaY > 0 ? delta : -delta);
+  }
 }
 
 // Touch handlers emulate mouse
@@ -703,7 +684,8 @@ onTouchMove(e) {
 onTouchEnd(e) {
   e.preventDefault();
   this.onMouseUp();
-  this.onMouseMove({ clientX: -10, clientY: -10});
+  this.onMouseMove({ clientX: -1, clientY: -1});
+  this.redraw(false);
 }
 
 }

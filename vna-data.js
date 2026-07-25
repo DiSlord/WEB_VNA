@@ -1,24 +1,24 @@
 /**
  * vna-data.js
  * Класс для управления данными ВНА.
- * Архитектура: единый массив из 5 слотов, где слот 0 = Live, слоты 1-4 = M1-M4.
+ * Архитектура: динамический массив слотов, где слот 0 = Live, остальные = Memory.
  */
 
 class VNAData {
-constructor() {
+constructor(slotsCount = 5) {
   this.slots = [];
-  for (let i = 0; i < 5; i++)
-    this.slots.push( {frequencies: [], S11: [], S21: [], S12: [], S22: []} );
+  for (let i = 0; i < slotsCount; i++)
+    this.slots.push({ frequencies: [], S11: [], S21: [], S12: [], S22: [] });
 }
 
 getSlot(slot, channel) {
-  if (slot < 0 || slot > 4) return { freqs: [], values: [] };
   const s = this.slots[slot];
+  if (!s) return { freqs: [], values: [] };
   return { freqs: s.frequencies, values: s[channel] || [] };
 }
 
 setSlotData(slot, freqs, S11, S21 = [], S12 = [], S22 = []) {
-  if (slot < 0 || slot > 4) return;
+  if (!this.slots[slot]) return;
   this.slots[slot] = {
    frequencies: freqs || [],
    S11: S11 || [],
@@ -28,13 +28,9 @@ setSlotData(slot, freqs, S11, S21 = [], S12 = [], S22 = []) {
   };
 }
 
-setLiveData(freqs, S11, S21, S12 = [], S22 = []) {
-  this.setSlotData(0, freqs, S11, S21, S12, S22);
-}
-
 copySlot(src, dst) {
-  if (src < 0 || src > 4 || dst < 0 || dst > 4) return;
   const s = this.slots[src];
+  if (!s || !this.slots[dst]) return;
   this.slots[dst] = {
    frequencies: [...s.frequencies],
    S11: [...s.S11], S21: [...s.S21],
@@ -43,20 +39,19 @@ copySlot(src, dst) {
 }
 
 clearSlot(slot) {
-  if (slot < 0 || slot > 4) return;
+  if (!this.slots[slot]) return;
   this.slots[slot] = { frequencies: [], S11: [], S21: [], S12: [], S22: [] };
 }
 
-clearAll() {
-  for (let i = 0; i < 5; i++) this.clearSlot(i);
-}
+clearAll() { this.slots.forEach((_, i) => this.clearSlot(i)); }
 
 getPointCount(slot = 0) {
+  if (!this.slots[slot]) return 0;
   return this.slots[slot].frequencies.length;
 }
 
 hasData(slot) {
-  if (slot < 0 || slot > 4) return false;
+  if (!this.slots[slot]) return false;
   return this.slots[slot].frequencies.length > 0;
 }
 

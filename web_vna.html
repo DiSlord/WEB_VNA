@@ -10,6 +10,13 @@
 <div class="container">
  <div class="side-panel">
   <div class="bar-column">
+   <label>Frequency</label>
+   <div class="bar-row"><div class ="flabel">Start:</div><input type="text" id="freqStart" data-field="start"></div>
+   <div class="bar-row"><div class ="flabel">Stop:</div><input type="text" id="freqStop"  data-field="stop"></div>
+   <div class="bar-row"><div class ="flabel">Center:</div><input type="text" id="freqCenter" data-field="center"></div>
+   <div class="bar-row"><div class ="flabel">Span:</div><input type="text" id="freqSpan"  data-field="span"></div>
+  </div>
+  <div class="bar-column">
    <label>Traces</label>
    <div class="bar-row">
     <button class="trace-btn" id="btnM0" onclick="toggleTrace(0)" oncontextmenu="showContextMenu(event, 0)">Live</button>
@@ -24,15 +31,12 @@
    <div class="bar-row">
     <button class="btn-main" onclick="addMarker()">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-     Add
     </button>
     <button class="btn-main" onclick="changeMarker()" id="btnEdit">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-     Change
     </button>
     <button class="btn-main" onclick="removeMarker()" id="btnDelete">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-    Remove
     </button>
    </div>
    <div class="table-wrapper">
@@ -70,6 +74,9 @@
 <script src="vna-graph.js"></script>
 <script>
 
+// =============================
+// Html elements
+// =============================
 const $ = id => document.getElementById(id);
 const themeSelect = $('themeSelect');
 const contextMenu = $('contextMenu');
@@ -79,9 +86,9 @@ const layoutSelect = $('layoutSelect');
 const areaPanels = $('areaPanels');
 const vnaCanvas = $('vnaCanvas');
 
-// ========================================================================
-// === ТЕМЫ ОФОРМЛЕНИЯ ===
-// ========================================================================
+// =============================
+// Themes and screen control
+// =============================
 const themeNames = ['Dark', 'Light', 'Gruvbox', 'Catppuccin', 'Material', 'Warm Dark', 'Midnight Blue'];
 const themes = {
  '--bg': ['#0a0a0f', '#f5f5f5', '#fbf1c7', '#eff1f5', '#fafafa', '#1a1512', '#0a0e1a'],
@@ -170,15 +177,15 @@ function toggleFullscreen() {
   else document.exitFullscreen();
 }
 
-// ========================================================================
-// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
-// ========================================================================
+// =============================
+// Global variables
+// =============================
 let vnaData;
 let graph;
 
-// ========================================================================
-// === КОНТЕКСТНОЕ МЕНЮ ===
-// ========================================================================
+// =============================
+//  Context menu
+// =============================
 function addMenuItem(menu, textContent, action, disabled = false) {
   if (textContent === null) return;
   const item = document.createElement('div');
@@ -265,9 +272,71 @@ document.addEventListener('click', (e) => {
   if (handler) handler(+menu.slot);
 });
 
-// ========================================================================
-// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ UI ===
-// ========================================================================
+// =============================
+// Freq inputs
+// =============================
+const freqInputs = {
+  start:  document.getElementById('freqStart'),
+  stop:   document.getElementById('freqStop'),
+  center: document.getElementById('freqCenter'),
+  span:   document.getElementById('freqSpan')
+};
+
+function updateFreqInputs() {
+  const view = graph.areas[0].view;
+  const start = view.xMin, stop = view.xMax;
+  const center = (start + stop) / 2;
+  const span = (stop - start);
+  const active = document.activeElement;
+  if (freqInputs.start  !== active) freqInputs.start.value  = formatFreqValue(start);
+  if (freqInputs.stop   !== active) freqInputs.stop.value   = formatFreqValue(stop);
+  if (freqInputs.center !== active) freqInputs.center.value = formatFreqValue(center);
+  if (freqInputs.span   !== active) freqInputs.span.value   = formatFreqValue(span);
+}
+
+const FREQ_MIN = 0;
+const FREQ_MAX = 10e9;
+
+function onFreqInputChange(e) {
+  const field = e.target.dataset.field;
+  const value = getValue(e.target.value);
+  if (isNaN(value) || value < 0) { updateFreqInputs(); return; }
+  const view = graph.areas[0].view;
+  let start = view.xMin, stop = view.xMax;
+  const freq = getValue(e.target.value);
+  let span = (stop - start) / 2;
+  let center = (start + stop) / 2;
+  switch (field) {
+   case 'start': start = freq; if (stop < start) stop = start; break;
+   case 'stop': stop = freq; if (stop < start) start = stop; break;
+   case 'center':
+    if (span > freq - FREQ_MIN) span = freq - FREQ_MIN;
+    if (span > FREQ_MAX - freq) span = FREQ_MAX - freq;
+    start = freq - span; stop = freq + span;
+    break;
+   case 'span':
+    span = freq / 2; 
+    if (center < FREQ_MIN + span) center = FREQ_MIN + span;
+    if (center > FREQ_MAX - span) center = FREQ_MAX - span;
+    start = center - span; stop = center + span;
+    break;
+   case 'cw':
+    start = freq; stop = freq;
+    break;
+   default: return;
+  }
+  graph.setRange(start, stop);
+}
+
+// Подписка на события
+Object.values(freqInputs).forEach(input => {
+  input.addEventListener('change', onFreqInputChange);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.target.blur(); } });
+});
+
+// =============================
+// Trace buttons
+// =============================
 function toggleTrace(slot) {
   const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
   if (!hasData) return;
@@ -288,6 +357,10 @@ function updateTraceButton(slot) {
 
 function updateAllTraceButtons() { for (let i = 0; i < 5; i++) updateTraceButton(i); }
 
+
+// =============================
+// File / copy / export
+// =============================
 function downloadFile(content, filename) {
   const blob = new Blob([content], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -297,28 +370,22 @@ function downloadFile(content, filename) {
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-function loadFile(e) {
-  const file = e.target.files[0];
-  const slot = e.target.slot;
+async function loadFile(file, slot = 0) {
   if (!file || slot < 0) return;
-  const reader = new FileReader();
-  reader.onload = function(event) {
-  try {
-    const parsed = vnaData.parseSnP(event.target.result);
-    if (parsed.freqs.length > 0) {
-      vnaData.setSlotData(slot, parsed.freqs, parsed.S11, parsed.S21, parsed.S12, parsed.S22);
-      if (slot == 0) graph.resetToRange(slot);
-      graph.visibility[slot] = true;
-      updateTraceButton(slot);
-      graph.redraw(true);
-      updateMarkerTable();
-    }
-  } catch (err) {
-    console.error('Parse error:', err);
-    alert('Parse error');
-  }
-  };
-  reader.readAsText(file);
+  const ext = file.name.split('.').pop();
+  const format = ['s1p', 's2p'].find(f => f === ext);
+  if (!format) return;
+  const buffer = await file.arrayBuffer();
+  const text = new TextDecoder().decode(buffer);
+  const parsed = vnaData.parseSnP(text);
+  if (!parsed || !parsed.freqs || parsed.freqs.length === 0) return;
+
+  vnaData.setSlotData(slot, parsed.freqs, parsed.S11, parsed.S21, parsed.S12, parsed.S22);
+  if (slot == 0) graph.resetToRange(slot);
+  graph.visibility[slot] = true;
+  updateTraceButton(slot);
+  graph.redraw(true);
+  updateMarkerTable();
 }
 
 function loadTestData() {
@@ -345,6 +412,9 @@ async function copyToClipboard() {
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
 }
 
+// =============================
+// Markers
+// =============================
 function addMarker() { graph.addMarker(); }
 function changeMarker() { graph.changeSelectedMarker(); }
 function removeMarker() { graph.removeSelectedMarker(); }
@@ -360,7 +430,9 @@ function updateMarkerTable() {
   });
 }
 
-// === ГЕНЕРАЦИЯ ПАНЕЛЕЙ AREA ===
+// =============================
+// Area panel creation and sync
+// =============================
 function buildAreaPanels() {
   areaPanels.innerHTML = '';
   graph.areas.forEach((area, areaIdx) => {
@@ -433,6 +505,9 @@ function updateChannelCheckboxes(panel, area) {
   });
 }
 
+// =============================
+// Select areas on canvas configuration
+// =============================
 const LAYOUT_PRESETS = [
   { name: '1: ◻', regions: [[0, 0, 1, 1]] },
   { name: '2: ◫', regions: [[0, 0, 0.5, 1], [0.5, 0, 1, 1]] },
@@ -443,7 +518,6 @@ const LAYOUT_PRESETS = [
   { name: '4: ⊞', regions: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] }
 ];
 
-// Функция-адаптер: преобразует [l, t, r, b] в объект region
 function getRegions(id) {
   const preset = LAYOUT_PRESETS[id];
   if (!preset) return [];
@@ -467,32 +541,36 @@ function changeLayout(layoutId) {
   const regionsArray = getRegions(layoutId);
   if (!regionsArray) return;
   localStorage.setItem('vna-layout', layoutId);
-  graph.setRegions(regionsArray); // Передаем именно МАССИВ объектов
+  graph.setRegions(regionsArray);
   buildAreaPanels();
 }
 
-// ========================================================================
-// === ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ===
-// ========================================================================
-// 1. Инициализация
+// =============================
+//  Инициализация
+// =============================
 function main() {
-  vnaData = new VNAData();
+  vnaData = new VNAData(5);
   graph = new VNAGraph('vnaCanvas', vnaData);
 
   // 2. UI
   initThemes();
   graph.updateColors()
 
-  // 3. Данные и отрисовка (строго в этом порядке!)
+  // 3. Данные и отрисовка
   initLayouts();
   loadTestData();
   graph.resetView();
+  updateFreqInputs();
   updateAllTraceButtons();
   updateMarkerTable();
 
   // 4. События
   window.addEventListener('resize', () => {graph.resize();});
-  fileInput.addEventListener('change', loadFile);
+  fileInput.addEventListener('change', async e => {loadFile(e.target.files[0], e.target.slot);});
+
+  // Drag & drop support
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', async e => {e.preventDefault(); loadFile(e.dataTransfer.files[0], 0);});
 }
 
 document.addEventListener('DOMContentLoaded', main);

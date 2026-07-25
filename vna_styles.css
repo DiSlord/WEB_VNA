@@ -122,11 +122,11 @@ select:focus {
    ЭЛЕМЕНТЫ УПРАВЛЕНИЯ (CONTROLS)
    ========================================= */
 .side-panel {
- width: 270px; 
- min-width: 270px; 
+ width: 210px; 
+ min-width: 210px; 
  background: var(--surface);
  border-radius: 5px;
- padding: 10px;
+ padding: 5px;
  display: flex;
  flex-direction: column;
  gap: 10px;
@@ -142,6 +142,27 @@ select:focus {
  padding-bottom: 5px;
 }
 
+.flabel {
+ min-width: 45px;
+ text-align: right;
+ padding-right: 5px;
+}
+
+.side-panel input {
+ width: 100%;
+ padding: 3px 6px;
+ background: var(--bg);
+ color: var(--text);
+ border: 1px solid var(--border);
+ border-radius: 3px;
+ font: var(--font-ui);
+ text-align: right;
+}
+.side-panel input:focus {
+ outline: none;
+ border-color: var(--accent);
+}
+
 .main-area {
  flex: 1;
  display: flex;
@@ -151,7 +172,7 @@ select:focus {
 }
 
 .top-bar {
- flex-shrink: 0; /* Не сжимается, занимает только свою высоту */
+ flex-shrink: 0;
  display: flex;
  justify-content: space-between;
  align-items: center;
@@ -250,7 +271,7 @@ canvas {
    ========================================= */
 .table-wrapper {
  width: 100%;
- height: 161px;
+ height: 171px;
  border: 1px solid var(--border);
  border-radius: 4px;
  overflow-y: auto;
@@ -259,10 +280,10 @@ canvas {
 
 .table {
  width: 100%;
- border-spacing: 0;
  font: var(--font-ui-small);
  background: var(--surface);
  table-layout: fixed;
+ border-collapse: collapse;
 }
 
 .table th {
@@ -285,7 +306,6 @@ canvas {
 
 .table tbody tr {
  cursor: pointer;
- transition: background 0.15s;
 }
 
 .table tbody tr:hover { background: var(--uploadbg); }

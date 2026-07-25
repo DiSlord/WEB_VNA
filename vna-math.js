@@ -295,6 +295,22 @@ function formatSmithValue(value, type = {}) {
   return `${formatValue(value.re, type)} ${formatValue(value.im, type, true)}`;
 }
 
+function getValue(text) {
+  if (typeof text !== 'string') return NaN;
+  text = text.trim().replace(',', '.');
+  const match = text.match(/^([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)[\s\d]*([a-zA-Zµ])?/);
+  if (!match) return NaN;
+  const num = parseFloat(match[1]);
+  const prefix = match[2];
+  if (!prefix) return num;
+  const normalizedPrefix = (prefix === 'u') ? 'µ' : prefix;
+  const bigIdx = BIG_PREFIXES.indexOf(normalizedPrefix);
+  if (bigIdx >= 0) return num * Math.pow(10, (bigIdx + 1) * 3);
+  const smallIdx = SMALL_PREFIXES.indexOf(normalizedPrefix);
+  if (smallIdx >= 0) return num * Math.pow(10, -(smallIdx + 1) * 3);
+  return NaN;
+}
+
 /**
  * Форматирует частоту с автоматическим подбором префикса
  * @param {number} freq      – частота в Гц
