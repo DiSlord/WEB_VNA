@@ -1,10 +1,11 @@
 const GRAPH_CONST = {
- AREA: { left: 60, right: 25, top: 35, bottom: 25 },
+ AREA: { left: 55, right: 25, top: 35, bottom: 25 },
  MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
  MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3,
+ MARKER_LINE: 1, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3,
  TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
  TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
- MARKER_DASH: [4, 4], CURSOR_DASH: [5, 5], GRID_DASH: [3, 3],
+ MARKER_DASH: [4, 4], CURSOR_DASH: [2, 2], GRID_DASH: [3, 3],
  ZOOM_FACTOR: 0.05,
  MARKER_PICKUP_RADIUS: 16
 };
@@ -23,15 +24,11 @@ const CSS_COLOR_VARS = Object.keys(CSS_COLORS);
 class Area {
 constructor(region) {
   this.region = region;
-  this.trace = { type: 'LOGMAG', channels: ['S11', 'S21'] };
-  this.view = { xMin: 0, xMax: 1000, yMin: -60, yMax: 0 };
-  this.cachedPoints = this._createEmptyCache();
-}
-
-_createEmptyCache() {
-  const cache = [];
-  for (let i = 0; i < 5; i++) cache[i] = {};
-  return cache;
+  this.trace = { type: 'LOGMAG', typeDef: null, channels: CH_PORT1, smithFormat: 'RX' };
+  this.view = { xMin: 1e6, xMax: 100e6, yMin: -60, yMax: 0 };
+  this.cachedPoints = [];
+  this.cachedMarkers = [];
+  this.cachedMarkerLines = [];
 }
 
 updateBounds(totalWidth, totalHeight) {
@@ -41,13 +38,17 @@ updateBounds(totalWidth, totalHeight) {
   const regionTop = Math.round(totalHeight * this.region.topPct);
   const regionBottom = Math.round(totalHeight * this.region.bottomPct);
   const fixRight = (this.region.rightPct < 1) ? 0 : padRight; // Fix area at right
+  const l = regionLeft + padLeft, r = regionRight - fixRight, t = regionTop + padTop, b = regionBottom - padBottom;
   this.bounds = {
-   left: regionLeft + padLeft,
-   right: regionRight - fixRight,
-   top: regionTop + padTop,
-   bottom: regionBottom - padBottom,
-   width: (regionRight - fixRight) - (regionLeft + padLeft),
-   height: (regionBottom - padBottom) - (regionTop + padTop)
+   left: l,
+   right: r,
+   top: t,
+   bottom: b,
+   width: r - l,
+   height: b - t,
+   cx: Math.round((l + r) / 2) + 0.5,
+   cy: Math.round((t + b) / 2+5) + 0.5,
+   R:  Math.min(r - l, b - t) / 2,
   };
   this.visible = this.region.rightPct > 0;
 }
@@ -56,120 +57,176 @@ setRange(start, stop) { this.view.xMin = start; this.view.xMax = stop; }
 
 setTraceType(type) {
   const typeDef = TRACE_TYPES[type];
-  if (!typeDef) { this.trace = { type: 'NONE', channels: [] }; return; }
-  const available = typeDef.channels;
-  const preserved = this.trace.channels.filter(ch => available.includes(ch));
-  const channels = preserved.length > 0 ? preserved : available;
-  this.trace = { type: type, channels };
-  this.view.yMin = typeDef.bottom;
-  this.view.yMax = typeDef.top;
-  this.rad = (type === 'SMITH' || type === 'POLAR');
+  if (!typeDef) { this.trace = {...this.trace, type: type, typeDef: null, channels: 0 }; return; }
+  const valid = this.trace.channels & typeDef.valid;
+  const channels = valid !== 0 ? valid : (typeDef.valid & -typeDef.valid);
+  this.trace = {...this.trace, type: type, typeDef: typeDef, channels: channels};
+  this.view = {...this.view, yMin: typeDef.bottom, yMax: typeDef.top, yLimit: typeDef.min };
+  this.rad = typeDef.rad || 0;
 }
 
 setChannels(channelsObj) {
-  const channels = Object.keys(channelsObj).filter(k => channelsObj[k]);
-  if (channels.length === 0) { this.trace.channels = []; return; }
-  const typeDef = TRACE_TYPES[this.trace.type];
-  if (!typeDef) return;
-  const valid = channels.filter(ch => typeDef.channels.includes(ch));
-  if (valid.length === 0) return;
-  this.trace.channels = valid;
+  const { typeDef } = this.trace;
+  let mask = 0;
+  if (channelsObj.S11) mask |= CH_S11;
+  if (channelsObj.S21) mask |= CH_S21;
+  if (channelsObj.S12) mask |= CH_S12;
+  if (channelsObj.S22) mask |= CH_S22;
+  if (typeDef) mask&= typeDef.valid;
+  this.trace.channels = mask;
 }
 
 resetView(data) {
+  const { typeDef } = this.trace;
   const f = data.getSlot(0, 'S11').freqs;
   if (f && f.length > 0) this.setRange(f[0], f[f.length - 1]);
-  const typeDef = TRACE_TYPES[this.trace.type];
   if (typeDef) { this.view.yMin = typeDef.bottom; this.view.yMax = typeDef.top; }
 }
 
-clampXView() { if (this.view.xMin < 0) { this.view.xMax -= this.view.xMin; this.view.xMin = 0; } }
-
-calculatePoints(data, globalVisibility) {
-  this.cachedPoints = this._createEmptyCache();
-    
-  for (let slotIdx = 0; slotIdx < 5; slotIdx++) {
-    if (!globalVisibility[slotIdx]) continue;
-    const trace = this.trace;
-    const typeDef = TRACE_TYPES[trace.type];
-    if (!typeDef || !typeDef.calc) continue;
-
-    for (const channel of trace.channels) {
-      const slotData = data.getSlot(slotIdx, channel);
+calculateCache(data, graph) {
+  const { left, right, top, bottom, width, height, cx, cy, R } = this.bounds;
+  const { xMin, xMax, yMin, yMax } = this.view;
+  const { typeDef } = this.trace;
+  this.cachedPoints = [];
+  const channels = getChannelList(this.trace.channels);
+  if (!typeDef || !typeDef.calc) return;
+  for (let slot = 0; slot < graph.visibility.length; slot++) {
+    if (!graph.visibility[slot]) continue;
+    for (const channel of channels) {
+      const slotData = data.getSlot(slot, channel);
       if (!slotData || !slotData.freqs || slotData.freqs.length === 0) continue;
-
-      this.cachedPoints[slotIdx][channel] = [];
-      const targetArray = this.cachedPoints[slotIdx][channel];
-      const { bounds, view } = this;
-      const { yMin, yMax } = view;
-
+      const points = [];
       if (this.rad) {
-        const cx = bounds.left + bounds.width / 2;
-        const cy = bounds.top + bounds.height / 2;
-        const R = Math.min(bounds.width, bounds.height) / 2;
         for (let i = 0; i < slotData.freqs.length; i++) {
           const freq = slotData.freqs[i], s = slotData.values[i];
-          if (!s) continue;
-          let x = cx + s.re * R;
-          let y = cy - s.im * R;
-          x = Math.max(bounds.left, Math.min(bounds.right, x));
-          y = Math.max(bounds.top, Math.min(bounds.bottom, y));
-          targetArray.push({ x, y, freq, value: s });
+          if (s) points.push({x: cx + s.re * R, y: cy - s.im * R, freq, value: s });
         }
       } else {
         for (let i = 0; i < slotData.freqs.length; i++) {
           const freq = slotData.freqs[i], s = slotData.values[i];
           if (!s) continue;
           const value = typeDef.calc(s, i, freq, slotData.values, slotData.freqs);
-          let x = bounds.left + (freq - view.xMin) / (view.xMax - view.xMin) * bounds.width;
-          let y = bounds.top + (yMax - value) / (yMax - yMin) * bounds.height;
-          if (x < bounds.left) x = bounds.left; else if (x > bounds.right) x = bounds.right;
-          if (y < bounds.top) y = bounds.top; else if (y > bounds.bottom) y = bounds.bottom;
-          targetArray.push({ x, y, freq, value });
+          const x = left + (freq - xMin) / (xMax - xMin) * width;
+          const y = top + (yMax - value) / (yMax - yMin) * height;
+          points.push({ x, y, freq, value });
         }
       }
+      this.cachedPoints.push({ slot, channel, points });
     }
   }
+  this.updateMarkerPoints(graph.markers);
+}
+
+updateMarkerPoints(markers) {
+  const { left, right, width } = this.bounds;
+  this.cachedMarkers = [];
+  this.cachedMarkerLines = [];
+  if (!markers || markers.length === 0) return;
+  for (const entry of this.cachedPoints) {
+    const mPoints = [];
+    for (let m = 0; m < markers.length; m++) {
+      const interp = interpolatePoint(entry.points, markers[m].freq);
+      if (!interp) continue;
+      const p = this.clampPointToRect(interp, this.bounds);
+      if (interp.x >= left && interp.x <= right)
+        mPoints.push({ x: interp.x, y: p.y, freq: interp.freq, value: interp.value, idx: m });
+    }
+    if (mPoints.length > 0) { this.cachedMarkers.push({ slot: entry.slot, channel: entry.channel, points: mPoints }); }
+  }
+  if (!this.rad) {
+    const { xMin, xMax } = this.view;
+    for (let m = 0; m < markers.length; m++) {
+      const x = left + (markers[m].freq - xMin) / (xMax - xMin) * width;
+      if (x >= left && x <= right) this.cachedMarkerLines.push({ id: m, x });
+    }
+  }
+}
+
+findNearestInCache(x, y, maxRadius, cache) {
+  const maxDistSq = maxRadius * maxRadius;
+  let best = null;
+  let minDistSq = maxDistSq;
+  for (const entry of cache) {
+    for (const p of entry.points) {
+      const dx = x - p.x, dy = y - p.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= minDistSq) continue;
+      minDistSq = distSq;
+      best = { point: p, slot: entry.slot, channel: entry.channel };
+    }
+  }
+  return best;
 }
 
 getMouseArea(x, y, markers = []) {
   const { left, right, top, bottom, width, height } = this.bounds;
   const { xMin, xMax, yMin, yMax } = this.view;
+  const la = left - GRAPH_CONST.AREA.left, ba = bottom + GRAPH_CONST.AREA.bottom;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
-  if (this.rad) return { zone: 'plot', cursor: 'crosshair' };;
-  if (x < left && x > left - GRAPH_CONST.AREA.left && inV) {
+  if (this.rad) {
+    if (inH && inV && this.cachedMarkers.length > 0) {
+      const nearest = this.findNearestInCache(x, y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedMarkers);
+      if (nearest) return { zone: 'marker', index: nearest.point.idx, cursor: 'grabbing' };
+      return { zone: 'plot', cursor: 'crosshair' };
+    }
+    return null;
+  }
+  if (x < left && x > la && inV) {
     const rel = 3 * (y - top) / height;
     const min = rel > 1, max = rel < 2;
     return { zone: 'y', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ns-resize' };
   }
-  if (y > bottom && y < bottom + GRAPH_CONST.AREA.bottom && inH) {
+  if (y > bottom && y < ba && inH) {
     const rel = 3 * (x - left) / width;
     const min = rel < 2, max = rel > 1;
     return { zone: 'x', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ew-resize' };
   }
   if (inH && inV) {
-    for (let i = 0; i < markers.length && !this.rad; i++) {
-      const marker = markers[i];
-      const dx = Math.abs(x - left - (marker.freq - xMin) * width / (xMax - xMin));
-      if (dx < GRAPH_CONST.MARKER_PICKUP_RADIUS) return { zone: 'marker', index: i, dist: dx, cursor: 'grabbing' };
-    }  
+    for (const line of this.cachedMarkerLines)
+      if (Math.abs(x - line.x) < GRAPH_CONST.MARKER_PICKUP_RADIUS) return { zone: 'marker', index: line.id, cursor: 'grabbing' };
     return { zone: 'plot', cursor: 'crosshair' };
   }
   return null;
 }
 
 draw(ctx, graph) {
-       if (this.trace.type === 'SMITH') this.drawSmithGrid(ctx, graph);
-  else if (this.trace.type === 'POLAR') this.drawPolarGrid(ctx, graph);
+       if (this.rad === 1) this.drawSmithGrid(ctx, graph);
+  else if (this.rad === 2) this.drawPolarGrid(ctx, graph);
   else this.drawGrid(ctx, graph);
 
+  this.drawHeader(ctx, graph);
   this.drawTraces(ctx, graph);
   this.drawMarkers(ctx, graph);
+  this.drawCursorInfo(ctx, graph);
 }
 
 //drawLine(ctx, x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
-drawLine(ctx, x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(Math.round(x1-0.5)+0.5, Math.round(y1-0.5)+0.5); ctx.lineTo( Math.round(x2-0.5)+0.5, Math.round(y2-0.5)+0.5); ctx.stroke(); }
+drawLine(ctx, x1, y1, x2, y2) {
+ const d = ctx.lineWidth / 2;
+ ctx.moveTo(Math.round(x1-d)+d, Math.round(y1-d)+d);
+ ctx.lineTo( Math.round(x2-d)+d, Math.round(y2-d)+d);
+}
+
+drawCircle(ctx, x, y, r) {
+  const R = Math.abs(r);
+  ctx.moveTo(x + R, y); ctx.arc(x, y, R, 0, 2 * Math.PI);
+}
+
+clampPointToRect(p, rect) {
+  return { x: Math.max(rect.left, Math.min(rect.right, p.x)), y: Math.max(rect.top, Math.min(rect.bottom, p.y)) };
+}
+
+drawHeader(ctx, graph) {
+  const { left, top } = this.bounds;
+  const { typeDef, channels, smithFormat } = this.trace;
+  const channelNames = getChannelList(channels).join(', ');
+  const suffix = this.rad ? MARKER_INFO[smithFormat].name : typeDef.suffix;
+  const label = `[${channelNames}]  ${typeDef.name}${suffix ? ' (' + suffix + ')' : ''}`;
+  ctx.textAlign = 'left';
+  ctx.font = graph.getFont('axis');
+  ctx.fillText(label, left, top - 11);
+}
 
 drawGrid(ctx, graph) {
   const { left, right, top, bottom, width, height } = this.bounds;
@@ -184,197 +241,318 @@ drawGrid(ctx, graph) {
   const yTicks = getNiceTicks(yMin, yMax, MIN_GRID_SPACING_PY, height);
 
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
-  ctx.strokeStyle = graph.getCSSColor('--plot-grid');
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = 1;
   ctx.setLineDash(GRID_DASH);
 
   ctx.font = graph.getFont('axis-label');
   ctx.textAlign = 'center';
+  ctx.beginPath(); 
   for (const freq of xTicks.ticks) {
     const x = left + (freq - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
     ctx.fillText(formatFreqValue(freq, 3), x, bottom + 18);
   }
 
-  const trace = this.trace;
-  const typeDef = TRACE_TYPES[trace.type];
+  const { typeDef } = this.trace;
   ctx.textAlign = 'right';
   for (const value of yTicks.ticks) {
     const y = top + (yMax - value) / (yMax - yMin) * height;
     this.drawLine(ctx, left, y, right, y);
-    ctx.fillText(formatValue(value, typeDef), left - 5, y + 4);
+    ctx.fillText(formatValue(typeDef.f, value), left - 4, y + 4);
   }
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-  if (trace) {
-    const channelNames = trace.channels.join(', ');
-    const label = `${channelNames} ${typeDef.name}${typeDef.suffix ? ' (' + typeDef.suffix + ')' : ''}`;
-    ctx.textAlign = 'left';
-    ctx.font = graph.getFont('axis');
-    ctx.fillText(label, left, top - 11);
+  const { MARKER_DASH, MARKER_LINE } = GRAPH_CONST;
+  const activeColor = graph.getCSSColor('--marker-active');
+  const inactiveColor = graph.getCSSColor('--marker-inactive');
+  ctx.setLineDash(MARKER_DASH);
+  for (const line of this.cachedMarkerLines) {
+    ctx.beginPath();
+    const isSelected = line.id === graph.selectedMarkerIndex;
+    ctx.strokeStyle = isSelected ? activeColor : inactiveColor; ctx.lineWidth = MARKER_LINE;
+    this.drawLine(ctx, line.x, top, line.x, bottom);
+    ctx.stroke();
   }
   ctx.setLineDash([]);
 }
 
 drawPolarGrid(ctx, graph) {
-    const { left, top, width, height } = this.bounds;
-    const cx = left + width / 2;
-    const cy = top + height / 2;
-    const R = Math.min(width, height) / 2;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, 2 * Math.PI);
-    ctx.clip();
-    ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI);
-    ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); // Горизонтальная ось
-    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); // Вертикальная ось
-    ctx.stroke();
-    [0.2, 0.4, 0.6, 0.8].forEach(mag => { ctx.beginPath(); ctx.arc(cx, cy, R * mag, 0, 2 * Math.PI); ctx.stroke(); });
-    [Math.PI / 6, Math.PI / 3, -Math.PI / 6, -Math.PI / 3].forEach(angle => {
-      this.drawLine(ctx, cx + R * Math.cos(angle), cy - R * Math.sin(angle), cx - R * Math.cos(angle), cy + R * Math.sin(angle));
-    });
-    ctx.restore();
+  const { cx, cy, R } = this.bounds;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
+  ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
+  ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = 1;
+  ctx.font = graph.getFont('axis-label');
+
+  ctx.beginPath();
+  [0.2, 0.4, 0.6, 0.8, 1.0].forEach(mag => { 
+    this.drawCircle(ctx, cx, cy, R * mag, 0, 2 * Math.PI);
+    ctx.fillText(mag, cx + R * mag - 10, cy - 4);
+  } );
+  [0, Math.PI / 6, Math.PI / 3, Math.PI / 2, -Math.PI / 6, -Math.PI / 3].forEach(angle => {
+    this.drawLine(ctx, cx + R * Math.cos(angle), cy - R * Math.sin(angle), cx - R * Math.cos(angle), cy + R * Math.sin(angle));
+  });
+  ctx.stroke();
+
+  const { MARKER_DASH, MARKER_LINE } = GRAPH_CONST;
+  const activeColor = graph.getCSSColor('--marker-active');
+  const inactiveColor = graph.getCSSColor('--marker-inactive');
+  ctx.setLineDash(MARKER_DASH);
+  for (const marker of this.cachedMarkers)
+    for (const m of marker.points) {
+      ctx.beginPath();
+      const isSelected = m.idx === graph.selectedMarkerIndex;
+      ctx.strokeStyle = isSelected ? activeColor : inactiveColor; ctx.lineWidth = MARKER_LINE;
+      this.drawCircle(ctx, cx, cy, VNA_MATH.linear(m.value) * R);
+      ctx.stroke();
+    }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+drawSmithRLine(ctx, v, admit) {
+  if (v < 0) return;
+  const { cx, cy, R } = this.bounds;
+  let r = R / (v + 1); if (admit) r = -r;
+  this.drawCircle(ctx, cx + v*r, cy, r);
+}
+
+drawSmithXLine(ctx, v, admit) {
+  const { cx, cy, R } = this.bounds;
+  if (Math.abs(v) < 0.001) {this.drawLine(ctx, cx - R, cy, cx + R, cy); return;}
+  const m = admit ? -R : R, x = m / v;
+  this.drawCircle(ctx, cx + m, cy - x, x);
+}
+
+drawSmithLines(ctx, value, admit) {
+  const z = admit
+   ? { re: VNA_MATH.conductance(value) * VNA_MATH.Z0, im: VNA_MATH.susceptance(value) * VNA_MATH.Z0}
+   : { re: VNA_MATH.resistance(value) / VNA_MATH.Z0, im: VNA_MATH.reactance(value) / VNA_MATH.Z0};
+  this.drawSmithRLine(ctx, z.re, admit);
+  this.drawSmithXLine(ctx, z.im, admit);
 }
 
 drawSmithGrid(ctx, graph) {
-  const { left, top, width, height } = this.bounds;
-  const cx = left + width / 2; const cy = top + height / 2;
-  const R = Math.min(width, height) / 2;
+  const { MARKER_DASH, MARKER_LINE } = GRAPH_CONST;
+  const { cx, cy, R  } = this.bounds;
+  const fmtInfo = MARKER_INFO[this.trace.smithFormat];
+  const isAdmit = (fmtInfo && fmtInfo.admit);
+
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
+  ctx.beginPath();
   ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI);
-  ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
-
-  [0.2, 0.5, 1, 2, 5].forEach(y => { ctx.beginPath(); ctx.arc(cx + R * y / (y + 1), cy, R / (y + 1), 0, 2 * Math.PI); ctx.stroke(); });
-  [0.2, 0.5, 1, 2, 5].forEach(x => {
-     ctx.beginPath(); ctx.arc(cx + R, cy - (R / x), R / x, 0, 2 * Math.PI); ctx.stroke();
-     ctx.beginPath(); ctx.arc(cx + R, cy + (R / x), R / x, 0, 2 * Math.PI); ctx.stroke();
+  [0, 0.2, 0.5, 1, 2, 5].forEach(x => {
+    this.drawSmithRLine(ctx, x, isAdmit);
+    this.drawSmithXLine(ctx, x, isAdmit);
+    this.drawSmithXLine(ctx,-x, isAdmit);
   });
+  ctx.stroke();
+
+
+  const activeColor = graph.getCSSColor('--marker-active');
+  const inactiveColor = graph.getCSSColor('--marker-inactive');
+  ctx.setLineDash(MARKER_DASH);
+  for (const marker of this.cachedMarkers)
+    for (const m of marker.points) {
+      ctx.beginPath();
+      const isSelected = m.idx === graph.selectedMarkerIndex;
+      ctx.strokeStyle = isSelected ? activeColor : inactiveColor; ctx.lineWidth = MARKER_LINE;
+      this.drawSmithLines(ctx, m.value, isAdmit);
+      ctx.stroke();
+    }
+  ctx.setLineDash([]);
   ctx.restore();
+
+  ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
+  ctx.font = graph.getFont('axis-label');
+  ctx.beginPath();
+  [0.2, 0.5, 1, 2, 5].forEach(x => {
+    const r = isAdmit ? -R : R;
+    ctx.fillText(x * VNA_MATH.Z0, cx - R + 2 * R * x / (x + 1) + 4, cy - 4);
+    const re = (x * x - 1) / (x * x + 1), im = 2 * x / (x * x + 1);
+    const xP = cx + r * re;
+    const yU = cy - r * im;
+    const yD = cy + r * im;
+    ctx.textAlign = (xP < cx) ? 'right' : 'left';
+    ctx.fillText('j' + x * VNA_MATH.Z0, xP, yU);
+    ctx.fillText('-j' + x * VNA_MATH.Z0, xP, yD);
+  });
+  ctx.stroke();
+}
+
+clipLineToRect(p1, p2, rect) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  let t0 = 0, t1 = 1;
+  const clip = (p, q) => {
+    if (p === 0) return q >= 0;
+    const t = q / p;
+    if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; } 
+    else { if (t < t0) return false; if (t < t1) t1 = t; }
+    return true;
+  };
+  if (!clip(-dx, p1.x - rect.left) || !clip(dx, rect.right - p1.x) || 
+      !clip(-dy, p1.y - rect.top) || !clip(dy, rect.bottom - p1.y)) {
+    return null;
+  }
+  if (t0 > t1) return null;
+  // Точные координаты пересечения с границей
+  let x1 = p1.x + t0 * dx, y1 = p1.y + t0 * dy;
+  let x2 = p1.x + t1 * dx, y2 = p1.y + t1 * dy;
+  return { x1, y1, x2, y2 };
 }
 
 drawTraces(ctx, graph) {
   const { TRACE_LIVE_LINE, TRACE_STORED_LINE } = GRAPH_CONST;
-  const { left, top, width, height } = this.bounds;
-  const plotRect = { left, top, width, height };
-
-  graph.visibility.forEach((visible, slot) => {
-    if (!visible) return;
-    const trace = this.trace;
-    for (const channel of trace.channels) {
-      const points = this.cachedPoints[slot][channel];
-      if (!points || points.length === 0) return;
-      ctx.strokeStyle = graph.getTraceColor(`m${slot}`, channel);
-      ctx.lineWidth = slot === 0 ? TRACE_LIVE_LINE : TRACE_STORED_LINE;
-      ctx.beginPath(); let drawing = false;
-      for (let i = 0; i < points.length - 1; i++) {
-        const clipped = graph.clipLineToRect(points[i], points[i + 1], plotRect);
-        if (clipped) {
-          if (!drawing) { ctx.moveTo(clipped.x1, clipped.y1); drawing = true; } 
-          else { ctx.lineTo(clipped.x1, clipped.y1); }
-          ctx.lineTo(clipped.x2, clipped.y2);
-        } else { drawing = false; }
-      }
-      ctx.stroke();
+  const { bounds } = this;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(bounds.left, bounds.top, bounds.width, bounds.height); ctx.clip();
+  for (const entry of this.cachedPoints) {
+    const points = entry.points;
+    if (points.length < 2) continue;
+    ctx.strokeStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
+    ctx.lineWidth = entry.slot === 0 ? TRACE_LIVE_LINE : TRACE_STORED_LINE;
+    ctx.beginPath();
+    let prev = this.clampPointToRect(points[0], bounds);
+    ctx.moveTo(prev.x, prev.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const clipped = this.clipLineToRect(points[i-1], p, bounds);
+      const next = clipped ? { x: clipped.x2, y: clipped.y2 } : this.clampPointToRect(p, bounds);
+      ctx.lineTo(next.x, next.y);
     }
-  });
-}
-
-drawMarkers(ctx, graph) {
-  const { bounds, view } = this;
-  const activeColor = graph.getCSSColor('--marker-active'), inactiveColor = graph.getCSSColor('--marker-inactive');
-  ctx.font = graph.getFont('marker');
-  graph.markers.forEach((marker, i) => {
-    let markerX = bounds.left + (marker.freq - view.xMin) / (view.xMax - view.xMin) * bounds.width;
-    if (markerX < bounds.left || markerX > bounds.right) return;
-    const isSelected = (i === graph.selectedMarkerIndex);
-    if (!this.rad) {
-      markerX = Math.round(markerX) + 0.5;
-      ctx.setLineDash(GRAPH_CONST.MARKER_DASH);
-      ctx.strokeStyle = isSelected ? activeColor : inactiveColor;
-      ctx.lineWidth = isSelected ? 2 : 1;
-      this.drawLine(ctx, markerX, bounds.top, markerX, bounds.bottom);
-      ctx.setLineDash([]);
-    }
-    this._drawMarkerOnTraces(ctx, graph, marker, i, activeColor, inactiveColor, isSelected);
-  });
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 drawTextWithOutline(ctx, text, x, y, fillColor, outlineColor, lineWidth = 3) {
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = outlineColor;
-    ctx.strokeText(text, x, y);
-    ctx.fillStyle = fillColor;
-    ctx.fillText(text, x, y);
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = outlineColor;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fillColor;
+  ctx.fillText(text, x, y);
 }
 
-_drawMarkerOnTraces(ctx, graph, marker, markerIndex, activeColor, inactiveColor, isHighlighted) {
-  const markerOutline = graph.getCSSColor('--bg'), markerLabel = graph.getCSSColor('--marker-label');
+drawMarkers(ctx, graph) {
+  const { bounds, rad, trace, view } = this;
+  const { left, right, top, bottom } = bounds;
+  const { typeDef, smithFormat } = trace;
+  const { xMin, xMax } = view;
+  const activeColor = graph.getCSSColor('--marker-active');
+  const inactiveColor = graph.getCSSColor('--marker-inactive');
+  const markerLabel = graph.getCSSColor('--marker-label');
+  const markerOutline = graph.getCSSColor('--bg');
   const { MARKER_DOT_RADIUS, MARKER_SEL_DOT_RADIUS } = GRAPH_CONST;
-  graph.visibility.forEach((visible, slot) => {
-    if (!visible) return;
-    const trace = this.trace;
-    for (const channel of trace.channels) {
-      const points = this.cachedPoints[slot][channel];
-      if (!points || points.length < 2) return;
-      const interp = interpolatePoint(points, marker.freq);
-      if (!interp) return;
-      ctx.fillStyle = isHighlighted ? activeColor : inactiveColor;
-      ctx.beginPath(); ctx.arc(interp.x, interp.y, isHighlighted ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
-      ctx.strokeStyle = markerLabel; ctx.lineWidth = isHighlighted ? 2 : 1; ctx.stroke();
 
-      ctx.fillStyle = markerLabel; ctx.textAlign = 'left'; ctx.font = graph.getFont(isHighlighted ? 'amarker' : 'marker');
-      const typeDef = TRACE_TYPES[trace.type];
 
-      // Форматирование для Smith или обычных значений
-      let valText = '';
-      if (typeof interp.value === 'object') {
-        const re = interp.value.re, im = interp.value.im;
-        valText = `${re.toFixed(2)} ${im >= 0 ? '+' : '-'} j${Math.abs(im).toFixed(2)}`;
-      } else {
-        valText = formatValue(interp.value, typeDef);
-      }
- //   ctx.fillText(`M${markerIndex + 1}: ${valText}`, interp.x + 8, interp.y + 4);
-      this.drawTextWithOutline(ctx, `M${markerIndex + 1}: ${valText}`, interp.x + 8, interp.y + 4, markerLabel, markerOutline);
+  for (const marker of this.cachedMarkers) {
+    for (const m of marker.points) {
+      const isSelected = m.idx === graph.selectedMarkerIndex;
+      ctx.strokeStyle = markerLabel;
+      ctx.fillStyle = isSelected ? activeColor : inactiveColor;
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
+      ctx.stroke();
+      const valText = rad ? formatSmithValue(smithFormat, m.freq, m.value) : formatValue(typeDef.f, m.value);
+      const isNearRight = m.x + 70 > right;
+      ctx.textAlign = isNearRight ? 'right' : 'left';
+      ctx.fillStyle = markerLabel;
+      ctx.font = graph.getFont(isSelected ? 'amarker' : 'marker');
+      this.drawTextWithOutline(ctx, `M${m.idx + 1}: ${valText}`, m.x + (isNearRight ? -8 : 8), m.y + 4, markerLabel, markerOutline);
     }
-  });
+  }
+}
+
+drawTooltip(ctx, graph, x, y, infoLines) {
+  const { right, bottom, top } = this.bounds;
+  const { TOOLTIP_WIDTH, TOOLTIP_LINE_HEIGHT, TOOLTIP_PADDING, TOOLTIP_OFFSET } = GRAPH_CONST;
+  const panelHeight = 2 * TOOLTIP_PADDING + infoLines.length * TOOLTIP_LINE_HEIGHT;
+
+  let panelX = x + TOOLTIP_OFFSET;
+  let panelY = y - panelHeight / 2;
+  if (panelX + TOOLTIP_WIDTH > right) panelX = x - TOOLTIP_WIDTH - TOOLTIP_OFFSET;
+  if (panelY < top) panelY = top;
+  if (panelY + panelHeight > bottom) panelY = bottom - panelHeight;
+
+  ctx.fillStyle = graph.getCSSColor('--tooltip-bg');
+  ctx.strokeStyle = graph.getCSSColor('--tooltip-border');
+  ctx.lineWidth = 1;
+  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
+  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
+  ctx.fillStyle = graph.getCSSColor('--tooltip-text');
+  ctx.font = graph.getFont('tooltip');
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  for (let i = 0; i < infoLines.length; i++)
+    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING, panelY + TOOLTIP_PADDING + i * TOOLTIP_LINE_HEIGHT);
+  ctx.textBaseline = 'alphabetic';
 }
 
 drawCursorInfo(ctx, graph) {
-  if (this.rad) return;
   const { mouse } = graph;
-  const info = this.getMouseArea(mouse.x, mouse.y);
-  if (!info || info.zone !== 'plot') return false;
-  const { bounds, view } = this;
-  const cursorFreq = view.xMin + (mouse.x - bounds.left) / bounds.width * (view.xMax - view.xMin);
+  const { left, top, right, bottom, width, height, cx, cy, R } = this.bounds;
+  const { typeDef, smithFormat } = this.trace;
+  if (mouse.x < left || mouse.x > right || mouse.y > bottom || mouse.y < top) return false;
 
-  ctx.strokeStyle = graph.getCSSColor('--cursor-line');
-  ctx.lineWidth = 1;
+if (this.rad) {
+  const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedPoints);
+  if (!nearest) return false;
+  const { point, slot, channel } = nearest;
+
+  const fmtInfo = MARKER_INFO[smithFormat];
+  const isAdmit = (fmtInfo && fmtInfo.admit);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
+  ctx.strokeStyle = graph.getCSSColor('--cursor-line'); ctx.lineWidth = 1;
   ctx.setLineDash(GRAPH_CONST.CURSOR_DASH);
-  this.drawLine(ctx, mouse.x, bounds.top, mouse.x, bounds.bottom);
+  ctx.beginPath();
+  if (this.rad == 1) this.drawSmithLines(ctx, point.value, isAdmit);
+  else this.drawCircle(ctx, cx, cy, VNA_MATH.linear(point.value) * R);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.strokeStyle = graph.getCSSColor('--bg'); ctx.lineWidth = 1;
+  ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel); ctx.lineWidth = 1;
+  this.drawCircle(ctx, point.x, point.y, GRAPH_CONST.CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
+  ctx.stroke();
+
+  // Тултип
+  const infoLines = [`Freq: ${formatFreqValue(point.freq)}`];
+  const slotName = slot === 0 ? channel : `M${slot} ${channel}`;
+  const valText = formatSmithValue(smithFormat, point.freq, point.value);
+  infoLines.push(`${slotName}: ${valText}`);
+  this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
+  return true;
+}
+
+  const { view } = this;
+  const cursorFreq = view.xMin + (mouse.x - left) / width * (view.xMax - view.xMin);
+
+  ctx.strokeStyle = graph.getCSSColor('--cursor-line'); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.setLineDash(GRAPH_CONST.CURSOR_DASH);
+  this.drawLine(ctx, mouse.x, top, mouse.x, bottom);
+  ctx.stroke();
   ctx.setLineDash([]);
 
+  ctx.strokeStyle = graph.getCSSColor('--bg'); ctx.lineWidth = 1;
   const infoLines = [`Freq: ${formatFreqValue(cursorFreq)}`];
-  graph.visibility.forEach((visible, slot) => {
-    if (!visible) return;
-    const trace = this.trace;
-    for (const channel of trace.channels) {
-      const points = this.cachedPoints[slot][channel];
-      if (!points || points.length < 2) return;
-      const interp = interpolatePoint(points, cursorFreq);
-      if (!interp) return;
-
-      ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel);
-      ctx.beginPath(); ctx.arc(mouse.x, interp.y, GRAPH_CONST.CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
-      const slotName = slot === 0 ? channel: `M${slot} ${channel}`;
-      const typeDef = TRACE_TYPES[this.trace.type];
-      infoLines.push(`${slotName}: ${formatValue(interp.value, typeDef)}`);
-    }
-  });
-  graph.drawTooltip(mouse.x, mouse.y, infoLines);
+  for (const entry of this.cachedPoints) {
+    const interp = interpolatePoint(entry.points, cursorFreq);
+    if (!interp) continue;
+    ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
+    ctx.beginPath(); ctx.arc(mouse.x, interp.y, GRAPH_CONST.CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    let valText = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
+    valText += formatValue(typeDef.f, interp.value);
+    infoLines.push(valText);
+  }
+  this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
   return true;
 }
 
@@ -428,9 +606,17 @@ setupEventHandlers() {
   window.addEventListener('mouseup', this._boundOnMouseUp);
 }
 
+updateColors() {
+  const style = getComputedStyle(document.documentElement);
+  for (const varName of CSS_COLOR_VARS) this.colors[varName] = style.getPropertyValue(varName).trim() || CSS_COLORS[varName] || '';
+  for (let slot = 0; slot < 5; slot++)
+    for (const ch of ['S11', 'S21', 'S12', 'S22'])
+      this.colors[`--trace-m${slot}-${ch}`] = style.getPropertyValue(`--trace-m${slot}-${ch.toLowerCase()}`).trim() || '#888888';
+}
+
 getFont(type) { return getComputedStyle(document.documentElement).getPropertyValue(`--font-${type}`).trim() || "400 12px/1.2 'Arial', sans-serif"; }
 getCSSColor(varName, fallback) { return this.colors[varName] ?? fallback ?? CSS_COLORS[varName] ?? '#888888'; }
-getTraceColor(slot, channel) { return this.getCSSColor(`--trace-${slot}-${channel.toLowerCase()}`, '#888888'); }
+getTraceColor(slot, channel) { return this.getCSSColor(`--trace-${slot}-${channel}`, '#888888'); }
 
 setRegions(regions) {
   this.areas.forEach((area, i) => { area.region = regions[i] || { leftPct: 0, rightPct: 0, topPct: 0, bottomPct: 0 }; });
@@ -464,54 +650,6 @@ resetToRange(slot) {
 
 resetView() { for (const area of this.areas) area.resetView(this.data); this.redraw(true); }
 
-updateColors() {
-  const style = getComputedStyle(document.documentElement);
-  for (const varName of CSS_COLOR_VARS) this.colors[varName] = style.getPropertyValue(varName).trim() || CSS_COLORS[varName] || '';
-  for (let slot = 0; slot < 5; slot++)
-    for (const ch of ['S11', 'S21', 'S12', 'S22'])
-      this.colors[`--trace-m${slot}-${ch.toLowerCase()}`] = style.getPropertyValue(`--trace-m${slot}-${ch.toLowerCase()}`).trim() || '#888888';
-}
-
-drawTooltip(mouseX, mouseY, infoLines) {
-  const { width, height } = this.canvas.getBoundingClientRect();
-  const { ctx } = this;
-  const { TOOLTIP_WIDTH, TOOLTIP_LINE_HEIGHT, TOOLTIP_PADDING, TOOLTIP_OFFSET } = GRAPH_CONST;
-  const panelHeight = 2 * TOOLTIP_PADDING + infoLines.length * TOOLTIP_LINE_HEIGHT;
-
-  let panelX = mouseX + TOOLTIP_OFFSET;
-  let panelY = mouseY - panelHeight / 2;
-  if (panelX + TOOLTIP_WIDTH > width) panelX = mouseX - TOOLTIP_WIDTH - TOOLTIP_OFFSET;
-  if (panelY < 5) panelY = 5;
-  if (panelY + panelHeight > height) panelY = height - 5 - panelHeight;
-
-  ctx.fillStyle = this.getCSSColor('--tooltip-bg');
-  ctx.strokeStyle = this.getCSSColor('--tooltip-border');
-  ctx.lineWidth = 1;
-  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
-  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
-  ctx.fillStyle = this.getCSSColor('--tooltip-text');
-  ctx.font = this.getFont('tooltip');
-  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  for (let i = 0; i < infoLines.length; i++)
-    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING, panelY + TOOLTIP_PADDING + i * TOOLTIP_LINE_HEIGHT);
-  ctx.textBaseline = 'alphabetic';
-}
-
-clipLineToRect(p1, p2, rect) {
-  const dx = p2.x - p1.x, dy = p2.y - p1.y;
-  const right = rect.left + rect.width, bottom = rect.top + rect.height;
-  let t0 = 0, t1 = 1;
-  const clip = (p, q) => {
-    if (p === 0) return q >= 0;
-    const t = q / p;
-    if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
-    return true;
-  };
-  if (!clip(-dx, p1.x - rect.left) || !clip(dx, right - p1.x) || !clip(-dy, p1.y - rect.top) || !clip(dy, bottom - p1.y)) return null;
-  if (t0 > t1) return null;
-  return { x1: p1.x + t0 * dx, y1: p1.y + t0 * dy, x2: p1.x + t1 * dx, y2: p1.y + t1 * dy };
-}
-
 resize() {
   const { width, height } = this.canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -525,51 +663,55 @@ redraw(dirty = false) {
   const { width, height } = this.canvas.getBoundingClientRect();
   this.ctx.fillStyle = this.getCSSColor('--bg');
   this.ctx.fillRect(0, 0, width, height);
-  if (dirty) { for (const area of this.areas) area.calculatePoints(this.data, this.visibility); }
   for (const area of this.areas) {
     if (!area.visible) continue;
+    if (dirty) area.calculateCache(this.data, this);
     area.draw(this.ctx, this);
-    area.drawCursorInfo(this.ctx, this);
   }
 }
 
-addMarker() {
-  const area = this.areas[0], liveData = this.data.getSlot(0, 'S11');
-  if (!liveData || !liveData.freqs || liveData.freqs.length === 0) return;
-  const fstart = area.view.xMin, fstop = area.view.xMax;
-  let freq = fstart + (fstop - fstart) * (this.markers.length + 1) / 10;
-  if (freq > fstop) freq = fstop;
-  this.markers.push({ freq: Math.round(freq) });
-  this.selectedMarkerIndex = this.markers.length - 1;
-  this.redraw();
+updateMarkers() {
+  for (const area of this.areas) area.updateMarkerPoints(this.markers);
   updateMarkerTable();
+  this.redraw();
+}
+
+addMarker() {
+  const area = this.areas[0];
+  if (!area) return;
+  const { xMin, xMax } = area.view;
+  let freq = xMin + (xMax - xMin) * (this.markers.length + 1) / 10;
+  if (freq > xMax) freq = xMax;
+  this.markers.push({ freq: Math.round(freq) });
+  this.selectMarker(this.markers.length - 1);
+}
+
+setMarkerFreq(idx, freq) {
+  if (idx < 0 || idx >= this.markers.length || isNaN(freq) || freq < 0) return;
+  this.markers[idx].freq = Math.round(freq);
+  this.updateMarkers();
 }
 
 changeSelectedMarker() {
-  if (this.selectedMarkerIndex < 0 || this.selectedMarkerIndex >= this.markers.length) return;
-  const marker = this.markers[this.selectedMarkerIndex];
-  const input = prompt(`Введите частоту для маркера M${this.selectedMarkerIndex + 1}:`, marker.freq);
+  const idx = this.selectedMarkerIndex;
+  if (idx < 0 || idx >= this.markers.length) return;
+  const marker = this.markers[idx];
+  const input = prompt(`Введите частоту для маркера M${idx + 1}:`, marker.freq);
   if (input === null) return;
-  const newFreq = getValue(input);
-  if (isNaN(newFreq) || newFreq < 0) return;
-  marker.freq = Math.round(newFreq);
-  this.redraw();
-  updateMarkerTable();
+  this.setMarkerFreq(idx, getValue(input));
 }
 
 removeSelectedMarker() {
   if (this.selectedMarkerIndex < 0 || this.selectedMarkerIndex >= this.markers.length) return;
   this.markers.splice(this.selectedMarkerIndex, 1);
   this.selectedMarkerIndex = this.markers.length > 0 ? Math.min(this.selectedMarkerIndex, this.markers.length - 1) : -1;
-  this.redraw();
-  updateMarkerTable();
+  this.updateMarkers();
 }
 
 selectMarker(index) {
   if (this.selectedMarkerIndex === index) return;
   this.selectedMarkerIndex = index;
-  this.redraw();
-  updateMarkerTable();
+  this.updateMarkers();
 }
 
 _tryRegisterDrag(area, info, x, y) {
@@ -590,28 +732,32 @@ _tryRegisterDrag(area, info, x, y) {
 
 _markerDragHandler(action, area, x, y) {
   if (action === 'drag') {
-    const { bounds, view } = area;
-    let freq = view.xMin + (x - bounds.left) / bounds.width * (view.xMax - view.xMin);
-    if (freq < view.xMin) freq = view.xMin; if (freq > view.xMax) freq = view.xMax;
-    this.markers[this.mouse.handlerData.index].freq = Math.round(freq);
-    updateMarkerTable();
-    this.redraw();
+    if (area.rad) {
+      const nearest = area.findNearestInCache(x, y, Infinity, area.cachedPoints);
+      if (nearest) this.setMarkerFreq(this.mouse.handlerData.index, nearest.point.freq);
+    } else {
+      const { bounds, view } = area;
+      let freq = view.xMin + (x - bounds.left) / bounds.width * (view.xMax - view.xMin);
+      if (freq < view.xMin) freq = view.xMin; if (freq > view.xMax) freq = view.xMax;
+      this.setMarkerFreq(this.mouse.handlerData.index, freq);
+    }
   }
   return true;
 }
 
 applyAxisDelta(area, info, delta) {
-    if (!area || !info.zone) return;
-    const { view } = area;
-    if (info.zone === 'x') {
-        if (info.min && view.xMin < delta) { delta = view.xMin;}
-        if (info.min) view.xMin -= delta; 
-        if (info.max) view.xMax -= delta;
-    } else if (info.zone === 'y') {
-        if (info.min) view.yMin -= delta;
-        if (info.max) view.yMax -= delta;
-    }
-    this.redraw(true);
+  if (!area || !info.zone) return;
+  const { view } = area;
+  if (info.zone === 'x') {
+    if (info.min && view.xMin < delta) { delta = view.xMin;}
+    if (info.min) view.xMin -= delta;
+    if (info.max) view.xMax -= delta;
+  } else if (info.zone === 'y') {
+    if (info.min && view.yLimit != null && view.yMin < delta + view.yLimit) { delta = view.yMin - view.yLimit;}
+    if (info.min) view.yMin -= delta;
+    if (info.max) view.yMax -= delta;
+  }
+  this.redraw(true);
 }
 
 _axisDragHandler(action, area, x, y) {
@@ -643,7 +789,7 @@ onMouseMove(e) {
   if (this.mouse.handler) { this.mouse.handler('drag', x, y); return; }
   const { width, height } = this.canvas.getBoundingClientRect();
   if (x < 0 || x >= width || y < 0 || y >= height) return;
-  let cursor = 'crosshair'; 
+  let cursor = 'crosshair';
   for (const area of this.areas) {
     const info = area.getMouseArea(x, y, this.markers);
     if (info) { cursor = info.cursor; break; }

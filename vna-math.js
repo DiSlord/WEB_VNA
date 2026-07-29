@@ -21,11 +21,11 @@ const VNA_MATH = {
  // SWR = (1 + |S|) / (1 - |S|)
  swr: (s) => { const x = VNA_MATH.linear(s); return x > 0.99 ? Infinity : (1.0 + x) / (1.0 - x); },
 
- // RESISTANCE (R) = |2 * Z0 * (1 - re) / ((1 - re)^2 + (-im)^2) - Z0|
+ // RESISTANCE (R) = Z0 * |Γ|² / |1 - Γ|²
  resistance: (s) => {
-   const re = 1.0 - s.re, im = -s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? 0 : Math.abs(2 * VNA_MATH.Z0 * re / l - VNA_MATH.Z0);
+   const mag2 = VNA_MATH._l(s.re, s.im);      // |Γ|²
+   const denom = VNA_MATH._l(1 - s.re,  s.im);// |1 - Γ|²
+   return denom === 0 ? 0 : VNA_MATH.Z0 * (1 - mag2) / denom;
  },
 
  // REACTANCE (X) = -2 * Z0 * (-im) / ((1 - re)^2 + (-im)^2)
@@ -68,7 +68,7 @@ const VNA_MATH = {
    const z0_inv = 1.0 / VNA_MATH.Z0;
    const re = 1.0 + s.re, im = s.im;
    const l = VNA_MATH._l(re, im);
-   return l === 0 ? 0 : Math.abs(2 * z0_inv * re / l - z0_inv);
+   return l === 0 ? 0 : 2 * z0_inv * re / l - z0_inv;
  },
 
  // SUSCEPTANCE (B) = -2 * (1/Z0) * im / ((1 + re)^2 + im^2)
@@ -255,49 +255,102 @@ function interpolatePoint(points, targetFreq) {
 const BIG_PREFIXES = ['k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const SMALL_PREFIXES = ['m', 'µ', 'n', 'p', 'f', 'a', 'z', 'y'];
 
-/**
- * Форматирует число с автоматическим подбором метрического префикса
- * @param {number} value - Значение
- * @param {number} precision - Базовая точность (кол-во знаков после запятой)
- * @param {string} suffix - Единица измерения (Ω, F, H, s и т.д.)
- * @param {boolean} usePrefix - Применять ли префиксы (k, M, m, µ, n)
- */
-function formatValue(value, type = {}, im = false) {
-  const decimals  = type.decimals  ?? 3;
-  const suffix    = type.suffix    ?? '';
-  const usePrefix = type.usePrefix ?? false;
-  const adjustPrecision = type.adjustPrecision ?? true;
-  if (value === undefined || value === null || !isFinite(value)) return '∞' + (suffix ? ' ' + suffix : '');
-  if (value === 0) return '0' + (suffix ? ' ' + suffix : '');
-  let sign = im ? (value < 0 ? '- j' : '+ j') : (value < 0 ? '-' : '');
-
-  let absVal = Math.abs(value);
-  let prefix = '';
-  if (usePrefix) {
-    if (absVal >= 1) for (let i = 0; absVal >= 1000 && i < BIG_PREFIXES.length; i++) { absVal /= 1000; prefix = BIG_PREFIXES[i]; }
-    else             for (let i = 0; absVal <     1 && i < SMALL_PREFIXES.length; i++){ absVal *= 1000; prefix = SMALL_PREFIXES[i]; }
+const MAX_FREQ_PRECISION = 14;
+function _formatFreq(absFreq, precision) {
+  if (absFreq === 0) return '0';
+  absFreq = Math.round(absFreq);
+  const str = absFreq.toString();
+  const prefixIndex = Math.min(Math.floor((str.length - 1) / 3), BIG_PREFIXES.length - 1);
+  const prefix = BIG_PREFIXES[prefixIndex-1] || '';
+  let formatted = str.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  if (formatted.includes(' ')) formatted = formatted.replace(' ', '.');
+  if (precision !== 0) {
+    const effPrec = Math.min(precision, MAX_FREQ_PRECISION);
+    const divider = Math.pow(1000, prefixIndex);
+    const numValue = absFreq / divider;
+    formatted = Number(numValue.toFixed(effPrec)).toString();
   }
-  let adjDecimals = decimals;
-  if (adjustPrecision) {
-    if (usePrefix && prefix) adjDecimals--;
-    const intPart = Math.floor(absVal);
-    if (intPart >= 100) adjDecimals -= 2;
-    else if (intPart >= 10) adjDecimals -= 1;
-    if (adjDecimals < 0) adjDecimals = 0;
-  }
-
-  let formatted = absVal.toFixed(adjDecimals);
-  formatted = formatted.replace(/\.?0+$/, '');
-  return sign + formatted + prefix + suffix;
+  return formatted + ' ' + prefix;
 }
 
-function formatSmithValue(value, type = {}) {
-  return `${formatValue(value.re, type)} ${formatValue(value.im, type, true)}`;
+function _formatFloat(absVal, precision) {
+  return absVal.toFixed(precision).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+}
+
+function _formatPFloat(absVal, precision) {
+  if (absVal === 0) return '0';
+  let prefix = '';
+  if (absVal >= 1) for (let i = 0; absVal >= 1000 && i < BIG_PREFIXES.length; i++) { absVal /= 1000; prefix = BIG_PREFIXES[i]; }
+  else             for (let i = 0; absVal <     1 && i < SMALL_PREFIXES.length; i++){ absVal *= 1000; prefix = SMALL_PREFIXES[i]; }
+  let adjDecimals = precision > 0 ? precision : 3;
+  if (prefix) adjDecimals--;
+  const intPart = Math.floor(absVal);
+  if (intPart >= 100) adjDecimals -= 2;
+  else if (intPart >= 10) adjDecimals -= 1;
+  if (adjDecimals < 0) adjDecimals = 0;
+  return _formatFloat(absVal, adjDecimals) + prefix;
+}
+
+/**
+ * Универсальная функция форматирования чисел
+ * Синтаксис: %[flags][width][.precision]type
+ * Флаги:
+ *   '+' - всегда показывать знак (+/-)
+ *   ' ' - пробел для положительных чисел
+ *   'j' - комплексное число (добавляет ' j' после знака)
+ * Типы:
+ *   d/i/u - целые (десятичные)
+ *   x/X   - шестнадцатеричные
+ *   o     - восьмеричные
+ *   b     - двоичные
+ *   f     - float без префикса
+ *   F     - float с SI-префиксом (k, M, G, m, µ, n...)
+ *   q     - частота с авто-префиксом
+ * @param {string} formatStr - Строка формата
+ * @param {...number} values - Значения для подстановки
+ * @returns {string} Отформатированная строка
+ */
+function formatValue(formatStr, ...values) {
+  if (typeof formatStr !== 'string') return String(values[0] ?? '');
+  let idx = 0;
+  return formatStr.replace(/%([-+ j]*)(\d*)(?:\.(\d*))?(?:h|l|L)?([dFqfxXUuob])/g, (match, flags, width, precision, type) => {
+    const value = values[idx++];
+    if (value === undefined || value === null || typeof value !== 'number') return 'NaN';
+    const hasPlus = flags.includes('+');
+    const hasSpace = flags.includes(' ');
+    const isNegative = value < 0;
+    let sign = isNegative ? '-' : hasPlus ? '+' : hasSpace ? ' ' : '';
+    if (flags.includes('j')) sign+= ' j';
+    if (!isFinite(value)) return sign + '∞';
+    const p = parseInt(precision, 10) || 0;
+    const absVal = Math.abs(value);
+    let str;
+    switch (type) {
+      case 'q': str = _formatFreq(absVal, p); break;           // Частота (как formatFreqValue)
+      case 'F': str = _formatPFloat(absVal, p); break;         // Float с SI-префиксом
+      case 'f': str = _formatFloat(absVal, p); break         ; // Float без префикса
+      case 'd':
+      case 'i': str = Math.round(absVal).toString(10); break;  // Знаковое десятичное
+      case 'u': str = Math.round(absVal).toString(10); break;  // Беззнаковое десятичное
+      case 'x': str = Math.round(absVal).toString(16); break;  // Шестнадцатеричное (нижний регистр)
+      case 'X': str = Math.round(absVal).toString(16).toUpperCase(); break; // Шестнадцатеричное (верхний регистр)
+      case 'o': str = Math.round(absVal).toString(8); break;   // Восьмеричное
+      case 'b': str = Math.round(absVal).toString(2); break;   // Двоичное
+      default:  str = String(absVal);
+    }
+    str = sign + str;
+/*
+    const w = parseInt(width, 10) || 0;
+    const isLeftAlign = flags.includes('-');
+    if (w > 0 && str.length < w) str = (isLeftAlign) ? str.padEnd(w, ' ') : str.padStart(w, ' ');
+*/
+    return str;
+  });
 }
 
 function getValue(text) {
   if (typeof text !== 'string') return NaN;
-  text = text.trim().replace(',', '.');
+  text = text.trim().replace(',', '.').replace(/\s+/g, '')
   const match = text.match(/^([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)[\s\d]*([a-zA-Zµ])?/);
   if (!match) return NaN;
   const num = parseFloat(match[1]);
@@ -311,30 +364,8 @@ function getValue(text) {
   return NaN;
 }
 
-/**
- * Форматирует частоту с автоматическим подбором префикса
- * @param {number} freq      – частота в Гц
- * @param {number} precision – кол-во знаков после запятой; если 0 – формат "1.234 567 890 G"
- * @returns {string} отформатированная строка
- */
-const MAX_FREQ_PRECISION = 14;
 function formatFreqValue(freq, precision = 0) {
-  if (freq === 0) return '0';
-  const sign = freq < 0 ? '-' : '';
-  const absFreq = Math.abs(Math.round(freq));
-  const str = absFreq.toString();
-  const prefixIndex = Math.min(Math.floor((str.length - 1) / 3), BIG_PREFIXES.length - 1);
-  const prefix = BIG_PREFIXES[prefixIndex-1] || '';
-  let formatted = str.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  if (formatted.includes(' ')) formatted = formatted.replace(' ', '.');
-
-  if (precision !== 0) {
-    const effPrec = Math.min(precision, MAX_FREQ_PRECISION);
-    const divider = Math.pow(1000, prefixIndex);
-    const numValue = absFreq / divider;
-    formatted = Number(numValue.toFixed(effPrec)).toString();
-  }
-  return sign + formatted + ' ' + prefix + 'Hz';
+  return formatValue(`%.${precision}qHz`, freq);
 }
 
 /**
@@ -353,49 +384,108 @@ function getNiceTicks(min, max, minPixelSpacing, totalPixels) {
   const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
   const normalized = roughStep / magnitude;
   const step = (nice.find(n => normalized <= n) || nice[nice.length - 1]) * magnitude;
+  const stepOrder = Math.floor(Math.log10(step));
+  const precision = Math.max(0, -stepOrder + 1); // +1 для запаса
   const epsilon = step * 1e-9;
   const start = Math.ceil((min - epsilon) / step) * step;
   const end = Math.floor((max + epsilon) / step) * step;
+  
   const ticks = [];
-  for (let v = start; v <= end + epsilon; v += step) ticks.push(Number(v.toPrecision(12)));
+  for (let i = 0; ; i++) {
+    const v = start + i * step;
+    if (v > end + epsilon) break;
+    ticks.push(Number(v.toFixed(precision)));
+  }
   return { ticks, step };
+}
+
+// Битовые маски каналов
+const CH_S11 = 1;  // 0001
+const CH_S21 = 2;  // 0010
+const CH_S12 = 4;  // 0100
+const CH_S22 = 8;  // 1000
+
+const CH_ALL = CH_S11 | CH_S21 | CH_S12 | CH_S22;
+const CH_REFLECT = CH_S11 | CH_S22;
+const CH_THRU = CH_S21 | CH_S12;
+const CH_PORT1 = CH_S11 | CH_S21;
+const CH_PORT2 = CH_S22 | CH_S12;
+
+function getChannelList(mask) {
+  const list = [];
+  if (mask & CH_S11) list.push('S11');
+  if (mask & CH_S21) list.push('S21');
+  if (mask & CH_S12) list.push('S12');
+  if (mask & CH_S22) list.push('S22');
+  return list;
 }
 
 const TRACE_TYPES = {
   // --- Общие для всех 4 каналов ---
-  NONE:   { name: 'None',   suffix: '',   decimals: 3, channels: [],                           top: 1, bottom: 0, usePrefix: false, calc: null },
-  LOGMAG: { name: 'LOGMAG', suffix: 'dB', decimals: 3, channels: ['S11', 'S21', 'S12', 'S22'], top: 0, bottom: -80, usePrefix: false, calc: (s) => VNA_MATH.logmag(s) },
-  PHASE:  { name: 'PHASE',  suffix: '°',  decimals: 3, channels: ['S11', 'S21', 'S12', 'S22'], top: 90, bottom: -90, usePrefix: true, calc: (s) => VNA_MATH.phase(s) },
-  DELAY:  { name: 'DELAY',  suffix: 's',  decimals: 4, channels: ['S11', 'S21', 'S12', 'S22'], top: 1e-9, bottom: -1e-9, usePrefix: true, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
-  LINEAR: { name: 'LINEAR', suffix: '',   decimals: 4, channels: ['S11', 'S21', 'S12', 'S22'], top: 1, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.linear(s) },
-  REAL:   { name: 'REAL',   suffix: '',   decimals: 6, channels: ['S11', 'S21', 'S12', 'S22'], top: 1, bottom: -1, usePrefix: true, calc: (s) => VNA_MATH.real(s) },
-  IMAG:   { name: 'IMAG',   suffix: 'j',  decimals: 6, channels: ['S11', 'S21', 'S12', 'S22'], top: 1, bottom: -1, usePrefix: true, calc: (s) => VNA_MATH.imag(s) },
-
-  SMITH:  { name: 'SMITH',  suffix: '',   decimals: 6, channels: ['S11', 'S22'], top: 1, bottom: -1, usePrefix: true, calc: (s) => s },
-  POLAR:  { name: 'POLAR',  suffix: '',   decimals: 3, channels: ['S11', 'S21', 'S12', 'S22'], top: 1, bottom: -1, usePrefix: false, calc: (s) => s },
+//  NONE:   { name: 'None',   f: 'none',   valid: 0},
+  LOGMAG: { name: 'LOGMAG', f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: (s) => VNA_MATH.logmag(s) },
+  PHASE:  { name: 'PHASE',  f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: (s) => VNA_MATH.phase(s) },
+  DELAY:  { name: 'DELAY',  f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
+  LINEAR: { name: 'LINEAR', f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: (s) => VNA_MATH.linear(s), min: 0, },
+  REAL:   { name: 'REAL',   f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: (s) => VNA_MATH.real(s) },
+  IMAG:   { name: 'IMAG',   f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: (s) => VNA_MATH.imag(s) },
 
   // --- Отражение (S11, S22) ---
-  SWR:    { name: 'SWR',       suffix: '',   decimals: 3, channels: ['S11', 'S22'], top: 5, bottom: 1, usePrefix: false, calc: (s) => VNA_MATH.swr(s) },
-  R:      { name: 'RESISTANCE',suffix: 'Ω',  decimals: 3, channels: ['S11', 'S22'], top: 500, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.resistance(s) },
-  X:      { name: 'REACTANCE', suffix: 'Ω',  decimals: 3, channels: ['S11', 'S22'], top: 500, bottom: -500, usePrefix: true, calc: (s) => VNA_MATH.reactance(s) },
-  Z:      { name: '|Z|',       suffix: 'Ω',  decimals: 3, channels: ['S11', 'S22'], top: 500, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.mod_z(s) },
-  ZPHASE: { name: 'Z PHASE',   suffix: '°',  decimals: 1, channels: ['S11', 'S22'], top: 90, bottom: -90, usePrefix: true, calc: (s) => VNA_MATH.phase_z(s) },
-  CS:     { name: 'SERIES C',  suffix: 'F',  decimals: 4, channels: ['S11', 'S22'], top: 1e-9, bottom: -1e-9, usePrefix: true, calc: (s, i, freq) => VNA_MATH.series_c(s, freq) },
-  LS:     { name: 'SERIES L',  suffix: 'H',  decimals: 4, channels: ['S11', 'S22'], top: 1e-8, bottom: -1e-8, usePrefix: true, calc: (s, i, freq) => VNA_MATH.series_l(s, freq) },
-  RP:     { name: 'PARALLEL R',suffix: 'Ω',  decimals: 3, channels: ['S11', 'S22'], top: 1000, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.parallel_r(s) },
-  XP:     { name: 'PARALLEL X',suffix: 'Ω',  decimals: 3, channels: ['S11', 'S22'], top: 1000, bottom: -1000, usePrefix: true, calc: (s) => VNA_MATH.parallel_x(s) },
-  CP:     { name: 'PARALLEL C',suffix: 'F',  decimals: 4, channels: ['S11', 'S22'], top: 1e-9, bottom: -1e-9, usePrefix: true, calc: (s, i, freq) => VNA_MATH.parallel_c(s, freq) },
-  LP:     { name: 'PARALLEL L',suffix: 'H',  decimals: 4, channels: ['S11', 'S22'], top: 1e-8, bottom: -1e-8, usePrefix: true, calc: (s, i, freq) => VNA_MATH.parallel_l(s, freq) },
-  Q:      { name: 'Q FACTOR',  suffix: '',   decimals: 4, channels: ['S11', 'S22'], top: 100, bottom: 0, usePrefix: false, calc: (s) => VNA_MATH.qualityfactor(s) },
-  G:      { name: 'CONDUCTANCE',suffix: 'S', decimals: 3, channels: ['S11', 'S22'], top: 0.1, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.conductance(s) },
-  B:      { name: 'SUSCEPTANCE',suffix: 'S', decimals: 3, channels: ['S11', 'S22'], top: 0.1, bottom: -0.1, usePrefix: true, calc: (s) => VNA_MATH.susceptance(s) },
-  Y:      { name: '|Y|',       suffix: 'S',  decimals: 3, channels: ['S11', 'S22'], top: 0.1, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.mod_y(s) },
+  SMITH1: { name: 'SMITH Refl', f: '%.6F',  valid: CH_REFLECT, top:   1, bottom:   -1, calc: (s) => s, rad: 1},
+  POLAR1: { name: 'POLAR Refl', f: '%.3F',  valid: CH_REFLECT, top:   1, bottom:   -1, calc: (s) => s, rad: 2},
+  SWR:    { name: 'SWR',        f: '%.3F',  valid: CH_REFLECT, top:   5, bottom:    1, calc: (s) => VNA_MATH.swr(s), min: 1 },
+  R:      { name: 'RESISTANCE', f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: (s) => VNA_MATH.resistance(s) },
+  X:      { name: 'REACTANCE',  f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom: -500, calc: (s) => VNA_MATH.reactance(s) },
+  Z:      { name: '|Z|',        f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: (s) => VNA_MATH.mod_z(s), min: 0 },
+  ZPHASE: { name: 'Z PHASE',    f: '%.3F°', valid: CH_REFLECT, top:  90, bottom:  -90, calc: (s) => VNA_MATH.phase_z(s) },
+  CS:     { name: 'SERIES C',   f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.series_c(s, freq) },
+  LS:     { name: 'SERIES L',   f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.series_l(s, freq) },
+  RP:     { name: 'PARALLEL R', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:    0, calc: (s) => VNA_MATH.parallel_r(s) },
+  XP:     { name: 'PARALLEL X', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:-1000, calc: (s) => VNA_MATH.parallel_x(s) },
+  CP:     { name: 'PARALLEL C', f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.parallel_c(s, freq) },
+  LP:     { name: 'PARALLEL L', f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.parallel_l(s, freq) },
+  Q:      { name: 'Q FACTOR',   f: '%.4F',  valid: CH_REFLECT, top: 100, bottom:    0, calc: (s) => VNA_MATH.qualityfactor(s), min: 0 },
+  G:      { name: 'CONDUCTANCE',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: (s) => VNA_MATH.conductance(s) },
+  B:      { name: 'SUSCEPTANCE',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom: -0.1, calc: (s) => VNA_MATH.susceptance(s) },
+  Y:      { name: '|Y|',        f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: (s) => VNA_MATH.mod_y(s), min: 0 },
+  
   // --- Прохождение (S21, S12) ---
-  RSER:   { name: 'SERIES R',  suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 500, bottom: -500, usePrefix: true, calc: (s) => VNA_MATH.s21series_r(s) },
-  XSER:   { name: 'SERIES X',  suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 500, bottom: -500, usePrefix: true, calc: (s) => VNA_MATH.s21series_x(s) },
-  ZSER:   { name: 'SERIES |Z|',suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 500, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.s21series_z(s) },
-  RSH:    { name: 'SHUNT R',   suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 250, bottom: -250, usePrefix: true, calc: (s) => VNA_MATH.s21shunt_r(s) },
-  XSH:    { name: 'SHUNT X',   suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 250, bottom: -250, usePrefix: true, calc: (s) => VNA_MATH.s21shunt_x(s) },
-  ZSH:    { name: 'SHUNT |Z|', suffix: 'Ω',  decimals: 3, channels: ['S21', 'S12'], top: 250, bottom: 0, usePrefix: true, calc: (s) => VNA_MATH.s21shunt_z(s) },
-  QS21:   { name: 'Q FACTOR',  suffix: '',   decimals: 4, channels: ['S21', 'S12'], top: 100, bottom: 0, usePrefix: false, calc: (s) => VNA_MATH.s21_qualityfactor(s) }
+  SMITH2: { name: 'SMITH Thru',   f: '%.6F', valid: CH_THRU,  top:   1, bottom:   -1, calc: (s) => s, rad: 1},
+  POLAR2: { name: 'POLAR Thru',   f: '%.3F', valid: CH_THRU,  top:   1, bottom:   -1, calc: (s) => s, rad: 2},
+  RSER:   { name: 'SERIES R',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: (s) => VNA_MATH.s21series_r(s) },
+  XSER:   { name: 'SERIES X',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: (s) => VNA_MATH.s21series_x(s) },
+  ZSER:   { name: 'SERIES |Z|',   f: '%.3FΩ', valid: CH_THRU, top: 500, bottom:    0, calc: (s) => VNA_MATH.s21series_z(s), min: 0 },
+  RSH:    { name: 'SHUNT R',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: (s) => VNA_MATH.s21shunt_r(s) },
+  XSH:    { name: 'SHUNT X',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: (s) => VNA_MATH.s21shunt_x(s) },
+  ZSH:    { name: 'SHUNT |Z|',    f: '%.3FΩ', valid: CH_THRU, top: 250, bottom:    0, calc: (s) => VNA_MATH.s21shunt_z(s), min: 0 },
+  QS21:   { name: 'Q FACTOR Thru',f: '%.4F',  valid: CH_THRU, top: 100, bottom:    0, calc: (s) => VNA_MATH.s21_qualityfactor(s), min: 0 }
 };
+
+const MARKER_INFO = {
+  LIN:        { name: "LIN",        valid: CH_ALL,     calcRe: VNA_MATH.linear,      calcIm: VNA_MATH.phase,       fmt: '%.2f %+.1f°',  isLC: false },
+  LOG:        { name: "LOG",        valid: CH_ALL,     calcRe: VNA_MATH.logmag,      calcIm: VNA_MATH.phase,       fmt: '%.1fdB %+.2f°',isLC: false },
+  REIM:       { name: "Re + jIm",   valid: CH_ALL,     calcRe: v => v.re,            calcIm: v => v.im,            fmt: '%.3F %j+.3F',  isLC: false },
+  RX:         { name: "R + jX",     valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3F %j+.3FΩ', isLC: false },
+  RLC:        { name: "R + L/C",    valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3FΩ %j+.3F', isLC: true  },
+  GB:         { name: "G + jB",     valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3F %j+.3FS', isLC: false, admit: true },
+  GLC:        { name: "G + L/C",    valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3FS %j+.3F', isLC: true,  admit: true },
+  RpXp:       { name: "Rp + jXp",   valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3F %j+.3FΩ', isLC: false, admit: true },
+  RpLC:       { name: "Rp + L/C",   valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3FΩ %j+.3F', isLC: true,  admit: true },
+  SHUNT_RX:   { name: "R+jX SH",    valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3F %j+.3FΩ', isLC: false },
+  SHUNT_RLC:  { name: "R+L/C SH",   valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3FΩ %j+.3F', isLC: true  },
+  SERIES_RX:  { name: "R+jX SE",    valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3F %j+.3FΩ', isLC: false },
+  SERIES_RLC: { name: "R+L/C SE",   valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3FΩ %j+.3F', isLC: true  }
+};
+
+function formatSmithValue(type, freq, value) {
+  const info = MARKER_INFO[type] || MARKER_INFO.REIM;
+  let zr = info.calcRe(value);
+  let zi = info.calcIm(value);
+  let suffix = '';
+  if (info.isLC) {
+    const w = 2 * Math.PI * freq; // аналог get_w(idx)
+    if (zi < 0) { zi = -1.0 / (w * zi); suffix = 'F'; }
+    else        { zi   = zi / w;        suffix = 'H'; }
+  }
+  return formatValue(info.fmt, zr, zi) + suffix;
+}

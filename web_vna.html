@@ -372,7 +372,7 @@ function downloadFile(content, filename) {
 
 async function loadFile(file, slot = 0) {
   if (!file || slot < 0) return;
-  const ext = file.name.split('.').pop();
+  const ext = file.name.split('.').pop().toLowerCase();
   const format = ['s1p', 's2p'].find(f => f === ext);
   if (!format) return;
   const buffer = await file.arrayBuffer();
@@ -416,8 +416,21 @@ async function copyToClipboard() {
 // Markers
 // =============================
 function addMarker() { graph.addMarker(); }
-function changeMarker() { graph.changeSelectedMarker(); }
 function removeMarker() { graph.removeSelectedMarker(); }
+function changeMarker() {
+  const idx = graph.selectedMarkerIndex;
+  if (idx < 0 || idx >= graph.markers.length) return;
+  const tdFreq = markerTable.querySelectorAll('tr')[idx].cells[1];
+  if (!tdFreq || tdFreq.querySelector('form')) return;
+  const currentValue = tdFreq.textContent;
+  tdFreq.innerHTML = `<form><input type="text" value="${currentValue}"></form>`;
+  const form = tdFreq.querySelector('form');
+  const input = form.querySelector('input');
+  input.focus();
+  input.setSelectionRange(0, currentValue.lastIndexOf(' '));
+  form.addEventListener('submit', (e) => {e.preventDefault(); graph.setMarkerFreq(idx, getValue(input.value)); });
+  input.addEventListener('blur', () => { tdFreq.textContent = currentValue; });
+}
 
 function updateMarkerTable() {
   markerTable.innerHTML = '';
@@ -445,7 +458,8 @@ function buildAreaPanels() {
     panel.style.left = (r.leftPct * 100 + 1) + '%';
     panel.style.top = (r.topPct * 100) + '%';
     panel.style.width = ((r.rightPct - r.leftPct) * 100 - 2) + '%';
-    // Dropdown типа трассы (заполняем из TRACE_TYPES)
+
+    // Dropdown TRACE_TYPES
     const sel = document.createElement('select');
     sel.innerHTML = '';
     for (const [type, def] of Object.entries(TRACE_TYPES)) {
@@ -455,10 +469,24 @@ function buildAreaPanels() {
       sel.appendChild(opt);
     }
     sel.value = area.trace.type;
-    sel.addEventListener('change', () => { area.setTraceType(sel.value); updateChannelCheckboxes(panel, area); graph.redraw(true); });
+    sel.addEventListener('change', () => { 
+     area.setTraceType(sel.value);
+     updateChannelCheckboxes(panel, area);
+     updateSmithFormatDropdown(panel, area);
+     graph.redraw(true);
+    });
     panel.appendChild(sel);
 
-    // Чекбоксы каналов
+    // Smith format select
+    const smithSel = document.createElement('select');
+    smithSel.className = 'smith-select';
+    smithSel.addEventListener('change', () => {
+      area.trace.smithFormat = smithSel.value;
+      graph.redraw(true);
+    });
+    panel.appendChild(smithSel);
+
+    // Channels checkboxes
     ['S11', 'S21', 'S12', 'S22'].forEach(ch => {
       const lbl = document.createElement('label');
       const cb = document.createElement('input');
@@ -490,19 +518,49 @@ function buildAreaPanels() {
     panel.appendChild(btnAuto);
     areaPanels.appendChild(panel);
     updateChannelCheckboxes(panel, area);
+    updateSmithFormatDropdown(panel, area);
   });
 }
 
 function updateChannelCheckboxes(panel, area) {
   const typeDef = TRACE_TYPES[area.trace.type];
-  const available = typeDef ? typeDef.channels : [];
-  const active = area.trace.channels;
-
+  const mask = area.trace.channels;
   panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
-   const isAvailable = available.includes(cb.channel); // 'S11', 'S21', 'S12', 'S22'
-   cb.disabled = !isAvailable;
-   cb.checked = isAvailable && active.includes(cb.channel);
+    const ch = cb.channel;
+    const chBit = ch === 'S11' ? CH_S11 : ch === 'S21' ? CH_S21 : ch === 'S12' ? CH_S12 : CH_S22;
+    cb.disabled = typeDef ? !(typeDef.valid & chBit) : false;
+    cb.checked = !!(mask & chBit);
   });
+}
+
+function updateSmithFormatDropdown(panel, area) {
+  const select = panel.querySelector('.smith-select');
+  if (!select) return;
+  const typeDef = TRACE_TYPES[area.trace.type];
+  if (!typeDef || !typeDef.rad) { select.style.display = 'none'; return; }
+  select.style.display = 'block';
+  select.innerHTML = '';
+
+  const currentChannels = area.trace.channels;
+  let hasValidOption = false;
+  for (const [key, info] of Object.entries(MARKER_INFO)) {
+    if (info.valid & currentChannels) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = info.name;
+      if (key === area.trace.smithFormat) opt.selected = true;
+      select.appendChild(opt);
+      hasValidOption = true;
+    }
+  }
+
+  if (!hasValidOption || !select.value) {
+    const firstValid = Object.entries(MARKER_INFO).find(([k, info]) => info.valid & currentChannels);
+    if (firstValid) {
+      area.trace.smithFormat = firstValid[0];
+      updateSmithFormatDropdown(panel, area);
+    }
+  }
 }
 
 // =============================

@@ -55,20 +55,19 @@
 /* =========================================
    3. ШРИФТЫ ГРАФИКА (Canvas)
    ========================================= */
- --font-axis:       700 15px/1.2 'Arial', sans-serif;
- --font-axis-label: 400 12px/1.2 'Arial', sans-serif;
- --font-marker:     400 14px/1.2 'Arial', sans-serif;
- --font-amarker:    700 15px/1.2 'Arial', sans-serif;
+ --font-axis:       700 15px/1.0 'Arial', sans-serif;
+ --font-axis-label: 400 12px/1.0 'Arial', sans-serif;
+ --font-marker:     400 14px/1.0 'Arial', sans-serif;
+ --font-amarker:    700 15px/1.0 'Arial', sans-serif;
  --font-tooltip:    400 14px 'Arial', sans-serif;
- --font-overlay:    700 16px/1.2 'Arial', sans-serif;
 
 /* =========================================
    4. ШРИФТЫ UI (Интерфейс)
    ========================================= */
- --font-ui:         400 14px/1.2 'Arial', sans-serif; /* Основной текст, лейблы, селекты */
+ --font-ui:         400 14px/1.0 'Arial', sans-serif; /* Основной текст, лейблы, селекты */
  --font-ui-small:   400 12px/1.0 'Arial', sans-serif; /* Таблицы, контекстное меню */
- --font-ui-title:   700 15px/1.2 'Arial', sans-serif; /* Заголовки секций */
- --font-ui-btn:     700 13px/1.2 'Arial', sans-serif; /* Текст всех кнопок */
+ --font-ui-title:   700 15px/1.0 'Arial', sans-serif; /* Заголовки секций */
+ --font-ui-btn:     700 14px/1.0 'Arial', sans-serif; /* Текст всех кнопок */
 }
 
 /* =========================================
@@ -87,6 +86,8 @@ body {
  font: var(--font-ui);
  background: var(--bg);
  color: var(--text);
+ height: 100vh;
+ width: 100vw;
  height: 100dvh;
  width: 100dvw;
  overflow: hidden;
@@ -308,6 +309,12 @@ canvas {
  cursor: pointer;
 }
 
+.table input {
+ width: 100%;
+ font: var(--font-ui);
+ padding: 0;
+}
+
 .table tbody tr:hover { background: var(--uploadbg); }
 .table tbody tr.selected { background: var(--accent); color: var(--bg); }
 
@@ -374,7 +381,7 @@ canvas {
  padding: 2px 4px;
  border-radius: 3px;
  font-size: 11px;
- margin-left: 20px;
+ margin-left: 5px;
 }
 .area-panel label {
  display: flex;
