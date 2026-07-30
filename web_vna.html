@@ -19,11 +19,11 @@
   <div class="bar-column">
    <label>Traces</label>
    <div class="bar-row">
-    <button class="trace-btn" id="btnM0" onclick="toggleTrace(0)" oncontextmenu="showContextMenu(event, 0)">Live</button>
-    <button class="trace-btn" id="btnM1" onclick="toggleTrace(1)" oncontextmenu="showContextMenu(event, 1)">M1</button>
-    <button class="trace-btn" id="btnM2" onclick="toggleTrace(2)" oncontextmenu="showContextMenu(event, 2)">M2</button>
-    <button class="trace-btn" id="btnM3" onclick="toggleTrace(3)" oncontextmenu="showContextMenu(event, 3)">M3</button>
-    <button class="trace-btn" id="btnM4" onclick="toggleTrace(4)" oncontextmenu="showContextMenu(event, 4)">M4</button>
+    <button class="trace-btn" id="btnM0" onclick="toggleTrace(0)" oncontextmenu="showSlotMenu(event, 0)">Live</button>
+    <button class="trace-btn" id="btnM1" onclick="toggleTrace(1)" oncontextmenu="showSlotMenu(event, 1)">M1</button>
+    <button class="trace-btn" id="btnM2" onclick="toggleTrace(2)" oncontextmenu="showSlotMenu(event, 2)">M2</button>
+    <button class="trace-btn" id="btnM3" onclick="toggleTrace(3)" oncontextmenu="showSlotMenu(event, 3)">M3</button>
+    <button class="trace-btn" id="btnM4" onclick="toggleTrace(4)" oncontextmenu="showSlotMenu(event, 4)">M4</button>
    </div>
   </div>
   <div class="bar-column">
@@ -197,80 +197,40 @@ function addMenuItem(menu, textContent, action, disabled = false) {
   menu.appendChild(item);
 }
 
-function showContextMenu(e, slot) {
-  e.preventDefault(); e.stopPropagation();
+function addMenuColumn(menu) {
+  const column = document.createElement('div');
+  column.className = 'menu-column';
+  menu.appendChild(column);
+  return column;
+}
+
+function showContextMenu(target) {
+  const rect = target.getBoundingClientRect();
   const m = contextMenu;
-  m.innerHTML = '';
-  m.slot = slot;
-
-  if (slot === 0) {
-    const hasData = vnaData.getSlot(0, 'S11').freqs.length > 0;
-    addMenuItem(m, '📏 Set to Live range', 'resetScale', !hasData);
-    addMenuItem(m, '💾 Export as S1P...', 'exportS1P', !hasData);
-    addMenuItem(m, '💾 Export as S2P...', 'exportS2P', !hasData);
-    addMenuItem(m, '📂 Load SnP...', 'loadSnP', false);
-  } else {
-    const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
-    addMenuItem(m, hasData ? '🔄 Resave Live here' : '💾 Save Live here', 'save', false);
-    addMenuItem(m, '🗑️ Clear slot', 'clear', !hasData);
-    addMenuItem(m, '📏 Set to this range', 'resetScale', !hasData);
-    addMenuItem(m, '💾 Export as S1P...', 'exportS1P', !hasData);
-    addMenuItem(m, '💾 Export as S2P...', 'exportS2P', !hasData);
-    addMenuItem(m, '📂 Load SnP...', 'loadSnP', false);
-  }
-  m.style.display = 'block';
-  m.style.left = e.pageX + 'px';
-  m.style.top = e.pageY + 'px';
+  m.style.display = 'flex';
+  m.style.left = rect.left + 'px';
+  m.style.top = (rect.bottom + window.scrollY + 3) + 'px';
 }
-
-function hideContextMenu() {
-  contextMenu.style.display = 'none';
-}
-
-const contextMenuActions = {
-  save: (slot) => {
-   if (slot > 0) {
-     graph.copySlot(0, slot);
-     updateTraceButton(slot);
-   }
-  },
-  clear: (slot) => {
-   if (slot > 0) {
-    graph.clearSlot(slot);
-    updateTraceButton(slot);
-   }
-  },
-  resetScale: (slot) => { graph.resetToRange(slot);},
-  exportS1P: (slot) => {
-   const content = vnaData.exportS1P(slot);
-   if (content) downloadFile(content, slot === 0 ? 'live.s1p' : `m${slot}.s1p`);
-  },
-  exportS2P: (slot) => {
-   const content = vnaData.exportS2P(slot);
-   if (content) downloadFile(content, slot === 0 ? 'live.s2p' : `m${slot}.s2p`);
-  },
-  loadSnP: (slot) => {
-   fileInput.slot = slot;
-   fileInput.value = '';
-   fileInput.click();
-  }
-};
+function hideContextMenu() { contextMenu.style.display = 'none'; }
+function isContextMenu() { return contextMenu.style.display !== 'none';}
 
 document.addEventListener('click', (e) => {
-  const menu = contextMenu;
-  if (!menu || !menu.contains(e.target)) {
-    if (menu && menu.style.display === 'block') menu.style.display = 'none';
+  const m = contextMenu;
+  if (!m.contains(e.target)) {
+    if (isContextMenu()) hideContextMenu();
     return;
   }
   e.stopPropagation();
   const menuItem = e.target.closest('.context-menu-item');
-  if (!menuItem || menuItem.classList.contains('disabled')) return;
-  const action = menuItem.action;
-  if (!action) return;
-  const handler = contextMenuActions[action];
+  if (!menuItem || menuItem.classList.contains('disabled') || !menuItem.action) return;
+  menuItem.action();
   hideContextMenu(); 
-  if (handler) handler(+menu.slot);
 });
+
+document.addEventListener('touchstart', (e) => {
+  const m = contextMenu;
+  if (!m.contains(e.target) && isContextMenu()) hideContextMenu();
+}, { passive: true });
 
 // =============================
 // Freq inputs
@@ -337,6 +297,38 @@ Object.values(freqInputs).forEach(input => {
 // =============================
 // Trace buttons
 // =============================
+function saveSlot(slot) { graph.copySlot(0, slot); updateTraceButton(slot); }
+function clearSlot(slot) { graph.clearSlot(slot); updateTraceButton(slot); }
+function resetScale(slot) { graph.resetToRange(slot); }
+function exportS1P(slot) { const content = vnaData.exportS1P(slot); if (content) downloadFile(content, slot === 0 ? 'live.s1p' : `m${slot}.s1p`); }
+function exportS2P(slot) { const content = vnaData.exportS2P(slot); if (content) downloadFile(content, slot === 0 ? 'live.s2p' : `m${slot}.s2p`); }
+function loadSnP(slot) { fileInput.slot = slot; fileInput.value = ''; fileInput.click(); }
+
+// Button context menu
+function showSlotMenu(e, slot) {
+  e.preventDefault(); // Prevent Right click
+  e.stopPropagation();
+  const m = contextMenu;
+  m.innerHTML = '';
+  const col = addMenuColumn(m);
+  if (slot === 0) {
+    const hasData = vnaData.getSlot(0, 'S11').freqs.length > 0;
+    addMenuItem(col, '📏 Set to Live range', () => resetScale(slot), !hasData);
+    addMenuItem(col, '💾 Export as S1P...', () => exportS1P(slot), !hasData);
+    addMenuItem(col, '💾 Export as S2P...', () => exportS2P(slot), !hasData);
+    addMenuItem(col, '📂 Load SnP...', () => loadSnP(slot), false);
+  } else {
+    const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
+    addMenuItem(col, hasData ? '🔄 Resave Live here' : '💾 Save Live here', () => saveSlot(slot), false);
+    addMenuItem(col, '🗑️ Clear slot', () => clearSlot(slot), !hasData);
+    addMenuItem(col, '📏 Set to this range', () => resetScale(slot), !hasData);
+    addMenuItem(col, '💾 Export as S1P...', () => exportS1P(slot), !hasData);
+    addMenuItem(col, '💾 Export as S2P...', () => exportS2P(slot), !hasData);
+    addMenuItem(col, '📂 Load SnP...', () => loadSnP(slot), false);
+  }
+  showContextMenu(e.target);
+}
+
 function toggleTrace(slot) {
   const hasData = vnaData.getSlot(slot, 'S11').freqs.length > 0;
   if (!hasData) return;
@@ -446,6 +438,37 @@ function updateMarkerTable() {
 // =============================
 // Area panel creation and sync
 // =============================
+function setTraceType(target, area, type) {
+  const panel = target.closest('.area-panel');
+  area.setTraceType(type);
+  updateTraceType(panel, area);
+  updateChannelCheckboxes(panel, area);
+  updateSmithFormatDropdown(panel, area);
+  graph.redraw(true);
+}
+
+function showTraceTypeDropdown(e, area) {
+  const m = contextMenu, target = e.target;
+  e.stopPropagation();
+  if (isContextMenu()) {hideContextMenu(); return;}
+  m.innerHTML = '';
+  const MAX_ROWS = 9;
+  const groups = {
+    'ALL': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_ALL),
+    'S11/S22': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
+    'S21/S12': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_THRU)
+  };
+  for (const [groupName, types] of Object.entries(groups)) {
+    for (let i = 0; i < types.length; i += MAX_ROWS) {
+      const chunk = types.slice(i, i + MAX_ROWS);
+      const col = addMenuColumn(m);
+      addMenuItem(col, i == 0 ? groupName : '\u00A0', null, true);
+      chunk.forEach(typeKey => { addMenuItem(col, TRACE_TYPES[typeKey].name, () => { setTraceType(target, area, typeKey); }); });
+    }
+  }
+  showContextMenu(target);
+}
+
 function buildAreaPanels() {
   areaPanels.innerHTML = '';
   graph.areas.forEach((area, areaIdx) => {
@@ -455,33 +478,21 @@ function buildAreaPanels() {
     panel.area = areaIdx;
     // Позиционируем панель в верхней части region
     const r = area.region;
-    panel.style.left = (r.leftPct * 100 + 1) + '%';
+    panel.style.left = (r.leftPct * 100) + '%';
     panel.style.top = (r.topPct * 100) + '%';
-    panel.style.width = ((r.rightPct - r.leftPct) * 100 - 2) + '%';
+    panel.style.width = ((r.rightPct - r.leftPct) * 100) + '%';
 
     // Dropdown TRACE_TYPES
-    const sel = document.createElement('select');
-    sel.innerHTML = '';
-    for (const [type, def] of Object.entries(TRACE_TYPES)) {
-      const opt = document.createElement('option');
-      opt.value = type;
-      opt.textContent = def.name + (def.suffix ? ` (${def.suffix})` : '');
-      sel.appendChild(opt);
-    }
-    sel.value = area.trace.type;
-    sel.addEventListener('change', () => { 
-     area.setTraceType(sel.value);
-     updateChannelCheckboxes(panel, area);
-     updateSmithFormatDropdown(panel, area);
-     graph.redraw(true);
-    });
-    panel.appendChild(sel);
+    const btn = document.createElement('button');
+    btn.className = 'trace-type';
+    btn.addEventListener('click', (e) => { showTraceTypeDropdown(e, area); });
+    panel.appendChild(btn);
 
     // Smith format select
     const smithSel = document.createElement('select');
     smithSel.className = 'smith-select';
     smithSel.addEventListener('change', () => {
-      area.trace.smithFormat = smithSel.value;
+      area.setSmithFormat(smithSel.value);
       graph.redraw(true);
     });
     panel.appendChild(smithSel);
@@ -517,9 +528,16 @@ function buildAreaPanels() {
     btnAuto.disabled = true;
     panel.appendChild(btnAuto);
     areaPanels.appendChild(panel);
+
+
+    updateTraceType(panel, area);
     updateChannelCheckboxes(panel, area);
     updateSmithFormatDropdown(panel, area);
   });
+}
+
+function updateTraceType(panel, area) {
+  type = panel.querySelector('.trace-type').textContent = '▾ ' + TRACE_TYPES[area.trace.type].name;
 }
 
 function updateChannelCheckboxes(panel, area) {
@@ -612,7 +630,8 @@ function main() {
 
   // 2. UI
   initThemes();
-  graph.updateColors()
+  graph.updateColors();
+  hideContextMenu();
 
   // 3. Данные и отрисовка
   initLayouts();
@@ -629,6 +648,10 @@ function main() {
   // Drag & drop support
   document.addEventListener('dragover', e => e.preventDefault());
   document.addEventListener('drop', async e => {e.preventDefault(); loadFile(e.dataTransfer.files[0], 0);});
+  
+  //  Block events if venu open
+  ['mousemove', 'mousedown', 'wheel', 'dblclick'].forEach(evt => { contextMenu.addEventListener(evt, e => e.stopPropagation());
+});
 }
 
 document.addEventListener('DOMContentLoaded', main);

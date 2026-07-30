@@ -327,13 +327,13 @@ canvas {
    КОНТЕКСТНОЕ МЕНЮ
    ========================================= */
 .context-menu {
+ display: none;
  position: absolute;
  background: var(--surface);
  border: 1px solid var(--border);
  border-radius: 4px;
  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
  z-index: 1000;
- display: none;
 }
 .context-menu-item {
  font: var(--font-ui);
@@ -354,6 +354,7 @@ canvas {
 .context-menu-item.danger:hover:not(.disabled) {
  background: var(--error);
 }
+.menu-column { display: flex; flex-direction: column; }
 
 .area-panels {
  position: absolute;
@@ -366,14 +367,12 @@ canvas {
  display: flex;
  align-items: center;
  gap: 6px;
- padding: 3px 8px;
  background: var(--bg);
  color: var(--text);
- font-size: 12px;
  pointer-events: auto;
  height: 28px;
- box-sizing: border-box;
  font: var(--font-ui-small);
+ padding-left: 20px;
 }
 .area-panel select {
  background: var(--uploadbg);
@@ -390,11 +389,16 @@ canvas {
  cursor: pointer;
 }
 .area-panel button {
- background: var(--na_button);
+ background: var(--uploadbg);
  color: var(--btn-text);
  border: 1px solid var(--border);
  padding: 1px 6px;
  border-radius: 3px;
  cursor: pointer;
+}
+
+.area-panel .trace-type {
+  min-width: 110px;
+  text-align: left;
 }
 .area-panel button:hover { border-color: var(--accent); }
