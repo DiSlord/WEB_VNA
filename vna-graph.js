@@ -369,7 +369,7 @@ drawSmithGrid(ctx, graph) {
     }
   ctx.setLineDash([]);
   ctx.restore();
-//  if (info.values !== true) return;
+  if (info.values !== true) return;
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
   ctx.font = graph.getFont('axis-label');
   ctx.beginPath();
