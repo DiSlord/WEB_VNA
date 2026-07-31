@@ -73,14 +73,13 @@ setSmithFormat(format) {
 }
 
 setChannels(channelsObj) {
-  const { typeDef } = this.trace;
   let mask = 0;
   if (channelsObj.S11) mask |= CH_S11;
   if (channelsObj.S21) mask |= CH_S21;
   if (channelsObj.S12) mask |= CH_S12;
   if (channelsObj.S22) mask |= CH_S22;
-  if (typeDef) mask&= typeDef.valid;
-  this.trace.channels = mask;
+  const { typeDef } = this.trace;
+  this.trace.channels = typeDef ? mask & typeDef.valid : mask;
 }
 
 resetView(data) {
@@ -370,7 +369,7 @@ drawSmithGrid(ctx, graph) {
     }
   ctx.setLineDash([]);
   ctx.restore();
-  if (info.values !== true) return;
+//  if (info.values !== true) return;
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
   ctx.font = graph.getFont('axis-label');
   ctx.beginPath();
@@ -551,9 +550,9 @@ drawCursorInfo(ctx, graph) {
       if (!interp) continue;
       ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
       ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-      let valText = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
-      valText += formatValue(typeDef.f, interp.value);
-      infoLines.push(valText);
+      const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
+      const valText = formatValue(typeDef.f, interp.value);
+      infoLines.push(`${slotName}: ${valText}`);
     }
     this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
   }
