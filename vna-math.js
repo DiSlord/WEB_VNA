@@ -120,7 +120,7 @@ const VNA_MATH = {
  // S21 SERIES R = 2 * Z0 * Re(S21) / |S21|² - 2 * Z0
  s21series_r: (s) => {
    const l = VNA_MATH._l(s.re, s.im);
-   return l === 0 ? Infinity : (2 * VNA_MATH.Z0 * s.re / l) - (2 * VNA_MATH.Z0);
+   return l === 0 ? 0 : (2 * VNA_MATH.Z0 * s.re / l) - (2 * VNA_MATH.Z0);
  },
 
  // S21 SERIES X = -2 * Z0 * Im(S21) / |S21|²
@@ -420,58 +420,140 @@ function getChannelList(mask) {
 
 const TRACE_TYPES = {
   // --- Общие для всех 4 каналов ---
-  LOGMAG: { name: 'Logmag',    f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: (s) => VNA_MATH.logmag(s) },
-  PHASE:  { name: 'Phase',     f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: (s) => VNA_MATH.phase(s) },
+  LOGMAG: { name: 'Logmag',    f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: VNA_MATH.logmag },
+  PHASE:  { name: 'Phase',     f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: VNA_MATH.phase },
   DELAY:  { name: 'Delay',     f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
-  LINEAR: { name: 'Linear'   , f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: (s) => VNA_MATH.linear(s), min: 0, },
-  REAL:   { name: 'Real',      f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: (s) => VNA_MATH.real(s) },
-  IMAG:   { name: 'Imaginary', f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: (s) => VNA_MATH.imag(s) },
+  LINEAR: { name: 'Linear'   , f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0, },
+  REAL:   { name: 'Real',      f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.real  },
+  IMAG:   { name: 'Imaginary', f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.imag  },
 
   // --- Отражение (S11, S22) ---
   SMITH1: { name: 'Smith Refl', f: '%.6F',  valid: CH_REFLECT, top:   1, bottom:   -1, calc: (s) => s, rad: 1},
-  POLAR1: { name: 'Polar Refl', f: '%.3F',  valid: CH_REFLECT, top:   1, bottom:   -1, calc: (s) => s, rad: 2},
-  SWR:    { name: 'SWR',        f: '%.3F',  valid: CH_REFLECT, top:   5, bottom:    1, calc: (s) => VNA_MATH.swr(s), min: 1 },
-  R:      { name: 'Resistance', f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: (s) => VNA_MATH.resistance(s) },
-  X:      { name: 'Reactance',  f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom: -500, calc: (s) => VNA_MATH.reactance(s) },
-  Z:      { name: '|Z|',        f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: (s) => VNA_MATH.mod_z(s), min: 0 },
-  ZPHASE: { name: 'Z PHASE',    f: '%.3F°', valid: CH_REFLECT, top:  90, bottom:  -90, calc: (s) => VNA_MATH.phase_z(s) },
+  SWR:    { name: 'SWR',        f: '%.3F',  valid: CH_REFLECT, top:   5, bottom:    1, calc: VNA_MATH.swr, min: 1 },
+  R:      { name: 'Resistance', f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: VNA_MATH.resistance },
+  X:      { name: 'Reactance',  f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom: -500, calc: VNA_MATH.reactance },
+  Z:      { name: '|Z|',        f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: VNA_MATH.mod_z, min: 0 },
+  ZPHASE: { name: 'Z PHASE',    f: '%.3F°', valid: CH_REFLECT, top:  90, bottom:  -90, calc: VNA_MATH.phase_z },
   CS:     { name: 'Series C',   f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.series_c(s, freq) },
   LS:     { name: 'Series L',   f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.series_l(s, freq) },
-  RP:     { name: 'Parallel R', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:    0, calc: (s) => VNA_MATH.parallel_r(s) },
-  XP:     { name: 'Parallel X', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:-1000, calc: (s) => VNA_MATH.parallel_x(s) },
+  RP:     { name: 'Parallel R', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:    0, calc: VNA_MATH.parallel_r },
+  XP:     { name: 'Parallel X', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:-1000, calc: VNA_MATH.parallel_x },
   CP:     { name: 'Parallel C', f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.parallel_c(s, freq) },
   LP:     { name: 'Parallel L', f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.parallel_l(s, freq) },
-  Q:      { name: 'Q factor',   f: '%.4F',  valid: CH_REFLECT, top: 100, bottom:    0, calc: (s) => VNA_MATH.qualityfactor(s), min: 0 },
-  G:      { name: 'Conductance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: (s) => VNA_MATH.conductance(s) },
-  B:      { name: 'Susceptance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom: -0.1, calc: (s) => VNA_MATH.susceptance(s) },
-  Y:      { name: '|Y|',        f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: (s) => VNA_MATH.mod_y(s), min: 0 },
+  Q:      { name: 'Q factor',   f: '%.4F',  valid: CH_REFLECT, top: 100, bottom:    0, calc: VNA_MATH.qualityfactor, min: 0 },
+  G:      { name: 'Conductance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: VNA_MATH.conductance },
+  B:      { name: 'Susceptance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom: -0.1, calc: VNA_MATH.susceptance },
+  Y:      { name: '|Y|',        f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: VNA_MATH.mod_y, min: 0 },
   
   // --- Прохождение (S21, S12) ---
   SMITH2: { name: 'Smith Thru',   f: '%.6F', valid: CH_THRU,  top:   1, bottom:   -1, calc: (s) => s, rad: 1},
-  POLAR2: { name: 'Polar Thru',   f: '%.3F', valid: CH_THRU,  top:   1, bottom:   -1, calc: (s) => s, rad: 2},
-  RSER:   { name: 'Series R',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: (s) => VNA_MATH.s21series_r(s) },
-  XSER:   { name: 'Series X',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: (s) => VNA_MATH.s21series_x(s) },
-  ZSER:   { name: 'Series |Z|',   f: '%.3FΩ', valid: CH_THRU, top: 500, bottom:    0, calc: (s) => VNA_MATH.s21series_z(s), min: 0 },
-  RSH:    { name: 'Shunt R',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: (s) => VNA_MATH.s21shunt_r(s) },
-  XSH:    { name: 'Shunt X',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: (s) => VNA_MATH.s21shunt_x(s) },
-  ZSH:    { name: 'Shunt |Z|',    f: '%.3FΩ', valid: CH_THRU, top: 250, bottom:    0, calc: (s) => VNA_MATH.s21shunt_z(s), min: 0 },
-  QS21:   { name: 'Q factor Thru',f: '%.4F',  valid: CH_THRU, top: 100, bottom:    0, calc: (s) => VNA_MATH.s21_qualityfactor(s), min: 0 }
+  RSER:   { name: 'Series R',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: VNA_MATH.s21series_r },
+  XSER:   { name: 'Series X',     f: '%.3FΩ', valid: CH_THRU, top: 500, bottom: -500, calc: VNA_MATH.s21series_x },
+  ZSER:   { name: 'Series |Z|',   f: '%.3FΩ', valid: CH_THRU, top: 500, bottom:    0, calc: VNA_MATH.s21series_z, min: 0 },
+  RSH:    { name: 'Shunt R',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: VNA_MATH.s21shunt_r },
+  XSH:    { name: 'Shunt X',      f: '%.3FΩ', valid: CH_THRU, top: 250, bottom: -250, calc: VNA_MATH.s21shunt_x },
+  ZSH:    { name: 'Shunt |Z|',    f: '%.3FΩ', valid: CH_THRU, top: 250, bottom:    0, calc: VNA_MATH.s21shunt_z, min: 0 },
+  QS21:   { name: 'Q factor Thru',f: '%.4F',  valid: CH_THRU, top: 100, bottom:    0, calc: VNA_MATH.s21_qualityfactor, min: 0 }
+};
+
+// ==========================================
+//   Structire for draw complex grid
+// ==========================================
+const H_AXIS = { x1: -1, y1: 0, x2: 1, y2: 0 };
+const V_AXIS = { x1: 0, y1: -1, x2: 0, y2: 1 };
+const COMPLEX_PARAMS = {
+ // ---- LIN (Polar) ----
+ LIN: {
+  gridRe: [0.2, 0.4, 0.6, 0.8],
+  gridIm: [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
+  reCircle(val) { return { cx: 0, cy: 0, r: val }; },
+  reLabel(val)  { return { nx: val, ny: 0 }; },
+  imCircle(val) { const a = val * Math.PI / 180; return { x1: 0, y1: 0, x2: Math.cos(a), y2: Math.sin(a) }; },
+  imLabel(val)  { const a = val * Math.PI / 180; return { nx: Math.cos(a), ny: Math.sin(a) }; },
+ },
+ // ---- LOG (Polar) ----
+ LOG: {
+  gridRe: [-3, -6, -10, -15, -20],
+  gridIm: [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180],
+  reCircle(val) { return { cx: 0, cy: 0, r: Math.pow(10, val / 20) }; },
+  reLabel(val)  { return { nx: Math.pow(10, val / 20), ny: 0 }; },
+  imCircle(val) { const a = val * Math.PI / 180; return { x1: 0, y1: 0, x2: Math.cos(a), y2: Math.sin(a) }; },
+  imLabel(val)  { const a = val * Math.PI / 180; return { nx: Math.cos(a), ny: Math.sin(a) }; },
+ },
+ // ---- REIM (Cartesian) ----
+ REIM: {
+  gridRe: [-1, -0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8, 1],
+  gridIm: [-1, -0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8, 1],
+  reCircle(val) { return { x1: val, y1: -1, x2: val, y2: 1 }; },
+  reLabel(val)  { return { nx: val, ny: 0 }; },
+  imCircle(val) { return { x1: -1, y1: val, x2: 1, y2: val }; },
+  imLabel(val)  { return { nx: 0, ny: val }; },
+ },
+ // ---- R + X (Reflection) ----
+ RX: {
+  gridRe: [0.2, 0.5, 1, 2, 5, 10].map(v => v * VNA_MATH.Z0),
+  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0),
+  reCircle(R) { return { cx: R / (R + VNA_MATH.Z0), cy: 0, r: VNA_MATH.Z0 / (R + VNA_MATH.Z0) }; },
+  reLabel(R)  { return { nx: (R - VNA_MATH.Z0) / (R + VNA_MATH.Z0), ny: 0 }; },
+  imCircle(X) { return Math.abs(X) < 0.1 ? H_AXIS : { cx: 1, cy: VNA_MATH.Z0 / X, r: VNA_MATH.Z0 / X }; },
+  imLabel(X)  { const d = (X*X + VNA_MATH.Z0*VNA_MATH.Z0); return { nx: (X*X - VNA_MATH.Z0*VNA_MATH.Z0)/d, ny: 2*VNA_MATH.Z0*X/d }; },
+  edgeLabels: [ { val: Infinity, nx: 1, ny: 0, align: 'left' } ]
+ },
+ // ---- G + B (Admittance) ----
+ GB: {
+  gridRe: [0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0),
+  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0),
+  reCircle(G) { const gn = G * VNA_MATH.Z0; return { cx: -gn / (gn + 1), cy: 0, r: 1 / (gn + 1) }; },
+  reLabel(G)  { const gn = G * VNA_MATH.Z0; return { nx: (1 - gn) / (1 + gn), ny: 0 }; },
+  imCircle(B) { const bn = B * VNA_MATH.Z0; return Math.abs(bn) < 1e-2 ? H_AXIS : { cx: -1, cy: -1 / bn, r: -1 / bn }; },
+  imLabel(B)  { const bn = B * VNA_MATH.Z0, d = bn * bn + 1; return { nx: (1 - bn * bn) / d, ny: -2 * bn / d }; },
+  edgeLabels: [ { val: Infinity, nx: -1, ny: 0, align: 'right' } ]
+ },
+ // ---- Rp + Xp (Parallel) ----
+ RpXp: {
+  gridRe: [0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0),
+  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5, Infinity].map(v => v * VNA_MATH.Z0),
+  reCircle(Rp) { return { cx: -VNA_MATH.Z0 / (VNA_MATH.Z0 + Rp), cy: 0, r: Rp / (VNA_MATH.Z0 + Rp) }; },
+  reLabel(Rp)  { return { nx: (Rp - VNA_MATH.Z0) / (Rp + VNA_MATH.Z0), ny: 0 }; },
+  imCircle(Xp) { const v = Xp / VNA_MATH.Z0; return Math.abs(v) > 100 ? H_AXIS : { cx: -1, cy: v, r: v }; },
+  imLabel(Xp)  { const d = (Xp*Xp + VNA_MATH.Z0*VNA_MATH.Z0); return { nx: (Xp*Xp - VNA_MATH.Z0*VNA_MATH.Z0) / d, ny: 2*VNA_MATH.Z0*Xp/d }; },
+  edgeLabels: [ { val: Infinity, nx: 1, ny: 0, align: 'left' } ]
+ },
+ // ---- S21 Series ----
+ S21SER: {
+  gridRe: [-500, -250, -200, -175, -125, -100, -75, -25, 0, 50, 250],
+  gridIm: [-200, -130, -50, -25, 0, 25, 50, 100, 130, 200],
+  reCircle(R) { const v = (R + 2 * VNA_MATH.Z0); return Math.abs(v) < 0.1 ? V_AXIS : { cx: VNA_MATH.Z0 / v, cy: 0, r: VNA_MATH.Z0 / v }; },
+  reLabel(R)  { const v = R / (2 * VNA_MATH.Z0) + 1; return  (Math.abs(v) >= 1) ? { nx: 1/v, ny: 0 } : { nx: v, ny: Math.sqrt(1 - v*v) }; },
+  imCircle(X) { const v =-VNA_MATH.Z0 / X; return Math.abs(v) < 1e-2 ? H_AXIS : { cx: 0, cy: v, r: v }; },
+  imLabel(X)  { const v = - X / (2 * VNA_MATH.Z0); return Math.abs(v) >= 1 ? { nx: 0, ny: 1/v } : { nx: Math.sqrt(1 - v*v), ny: v }; },
+ },
+ // ---- S21 Shunt ----
+ S21SH: {
+  gridRe: [-10, -6.25, 0, 12.5, 25, 50],
+  gridIm: [-50, -25, -12.5, -6.25, 0, 6.25, 12.5, 25, 50],
+  reCircle(R) { const v = VNA_MATH.Z0 / (4*R + 2*VNA_MATH.Z0); return { cx: 1 - v, cy: 0, r: v }; },
+  reLabel(R)  { const v = VNA_MATH.Z0 / (2*R +   VNA_MATH.Z0); return { nx: 1 - v, ny: 0 }; },
+  imCircle(X) { const v = VNA_MATH.Z0 / (4*X); return Math.abs(v) > 100 ? H_AXIS : { cx: 1, cy: v, r: v }; },
+  imLabel(X)  { const d = (16*X*X + VNA_MATH.Z0*VNA_MATH.Z0); return { nx: (16*X*X - VNA_MATH.Z0*VNA_MATH.Z0) / d, ny: 8*X*VNA_MATH.Z0 / d }; },
+  edgeLabels: [ { val: Infinity, nx: 1, ny: 0, align: 'left' } ]
+ }
 };
 
 const MARKER_INFO = {
-  LIN:        { name: "LIN",             valid: CH_ALL,     calcRe: VNA_MATH.linear,      calcIm: VNA_MATH.phase,       fmt: '%.2f %+.1f°',  isLC: false },
-  LOG:        { name: "LOG",             valid: CH_ALL,     calcRe: VNA_MATH.logmag,      calcIm: VNA_MATH.phase,       fmt: '%.1fdB %+.2f°',isLC: false },
-  REIM:       { name: "Re + Im",         valid: CH_ALL,     calcRe: v => v.re,            calcIm: v => v.im,            fmt: '%.3F %j+.3F',  isLC: false },
-  RX:         { name: "R + X",           valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3F %j+.3FΩ', isLC: false, values: true},
-  RLC:        { name: "R + L / C",       valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3FΩ %j+.3F', isLC: true , values: true },
-  GB:         { name: "G + B",           valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3F %j+.3FS', isLC: false, values: true, admit: true },
-  GLC:        { name: "G + L / C",       valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3FS %j+.3F', isLC: true,  values: true,  admit: true },
-  RpXp:       { name: "Rp + Xp",         valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3F %j+.3FΩ', isLC: false, values: true, admit: true },
-  RpLC:       { name: "Rp + L / C",      valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3FΩ %j+.3F', isLC: true,  values: true,  admit: true },
-  SHUNT_RX:   { name: "R + X Shunt",     valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3F %j+.3FΩ', isLC: false, values: true },
-  SHUNT_RLC:  { name: "R + L / C Shunt", valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3FΩ %j+.3F', isLC: true,  values: true  },
-  SERIES_RX:  { name: "R + X Series",    valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3F %j+.3FΩ', isLC: false },
-  SERIES_RLC: { name: "R + L / C Series",valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3FΩ %j+.3F', isLC: true  }
+  LIN:        { name: "LIN",             valid: CH_ALL,     calcRe: VNA_MATH.linear,      calcIm: VNA_MATH.phase,       fmt: '%.2f %+.1f°',  isLC: false, params: COMPLEX_PARAMS.LIN },
+  LOG:        { name: "LOG",             valid: CH_ALL,     calcRe: VNA_MATH.logmag,      calcIm: VNA_MATH.phase,       fmt: '%.1fdB %+.2f°',isLC: false, params: COMPLEX_PARAMS.LOG },
+  REIM:       { name: "Re + Im",         valid: CH_ALL,     calcRe: v => v.re,            calcIm: v => v.im,            fmt: '%.3F %j+.3F',  isLC: false, params: COMPLEX_PARAMS.REIM },
+  RX:         { name: "R + X",           valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3F %j+.3FΩ', isLC: false, params: COMPLEX_PARAMS.RX },
+  RLC:        { name: "R + L / C",       valid: CH_REFLECT, calcRe: VNA_MATH.resistance,  calcIm: VNA_MATH.reactance,   fmt: '%.3FΩ %j+.3F', isLC: true , params: COMPLEX_PARAMS.RX },
+  GB:         { name: "G + B",           valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3F %j+.3FS', isLC: false, params: COMPLEX_PARAMS.GB },
+  GLC:        { name: "G + L / C",       valid: CH_REFLECT, calcRe: VNA_MATH.conductance, calcIm: VNA_MATH.susceptance, fmt: '%.3FS %j+.3F', isLC: true,  params: COMPLEX_PARAMS.GB },
+  RpXp:       { name: "Rp + Xp",         valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3F %j+.3FΩ', isLC: false, params: COMPLEX_PARAMS.RpXp },
+  RpLC:       { name: "Rp + L / C",      valid: CH_REFLECT, calcRe: VNA_MATH.parallel_r,  calcIm: VNA_MATH.parallel_x,  fmt: '%.3FΩ %j+.3F', isLC: true,  params: COMPLEX_PARAMS.RpXp },
+  SHUNT_RX:   { name: "R + X Shunt",     valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3F %j+.3FΩ', isLC: false, params: COMPLEX_PARAMS.S21SH },
+  SHUNT_RLC:  { name: "R + L / C Shunt", valid: CH_THRU,    calcRe: VNA_MATH.s21shunt_r,  calcIm: VNA_MATH.s21shunt_x,  fmt: '%.3FΩ %j+.3F', isLC: true,  params: COMPLEX_PARAMS.S21SH },
+  SERIES_RX:  { name: "R + X Series",    valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3F %j+.3FΩ', isLC: false, params: COMPLEX_PARAMS.S21SER },
+  SERIES_RLC: { name: "R + L / C Series",valid: CH_THRU,    calcRe: VNA_MATH.s21series_r, calcIm: VNA_MATH.s21series_x, fmt: '%.3FΩ %j+.3F', isLC: true,  params: COMPLEX_PARAMS.S21SER }
 };
 
 function getSmithValue(type, value) {

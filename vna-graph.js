@@ -2,7 +2,7 @@ const GRAPH_CONST = {
  AREA: { left: 55, right: 25, top: 35, bottom: 25 },
  MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
  MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3, DOT_LINE: 1,
- MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 2, TRACE_STORED_LINE: 1,
+ MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
  TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
  MARKER_DASH: [4, 4], CURSOR_DASH: [2, 2], GRID_DASH: [3, 3],
  ZOOM_FACTOR: 0.05,
@@ -45,9 +45,9 @@ updateBounds(totalWidth, totalHeight) {
    bottom: b,
    width: r - l,
    height: b - t,
-   cx: Math.round((r + l) / 2) + 0.5,
-   cy: Math.round((b + t) / 2 + 5) + 0.5,
-   R:  Math.min(r - l, b - t) / 2,
+   cx: Math.round((r + l) / 2 - 8) + 0.5,
+   cy: Math.round((b + t) / 2 + 3) + 0.5,
+   R:  Math.min(r - l - 8, b - t - 6) / 2,
   };
   this.visible = this.region.rightPct > 0;
 }
@@ -197,8 +197,7 @@ getMouseArea(x, y, markers = []) {
 }
 
 draw(ctx, graph) {
-       if (this.rad === 1) this.drawSmithGrid(ctx, graph);
-  else if (this.rad === 2) this.drawPolarGrid(ctx, graph);
+  if (this.rad) this.drawComplexGrid(ctx, graph);
   else this.drawGrid(ctx, graph);
 
   this.drawHeader(ctx, graph);
@@ -256,7 +255,7 @@ drawGrid(ctx, graph) {
   for (const freq of xTicks.ticks) {
     const x = left + (freq - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
-    ctx.fillText(formatFreqValue(freq, 3), x, bottom + 18);
+    ctx.fillText(formatValue(`%.3qHz`, freq), x, bottom + 18);
   }
 
   const { typeDef } = this.trace;
@@ -282,114 +281,62 @@ drawGrid(ctx, graph) {
   ctx.setLineDash([]);
 }
 
-drawPolarGrid(ctx, graph) {
+drawComplexShape(ctx, shape) {
   const { cx, cy, R } = this.bounds;
+  if (shape.r) this.drawCircle(ctx, cx + shape.cx * R, cy - shape.cy * R, shape.r * R);
+  else this.drawLine(ctx, cx + shape.x1 * R, cy - shape.y1 * R, cx + shape.x2 * R, cy - shape.y2 * R);
+}
+
+drawComplexLabel(ctx, val, pos) {
+  const { cx, cy, R } = this.bounds;
+  ctx.textAlign = (pos.nx >= 0) ? 'left' : 'right';
+  ctx.textBaseline = (pos.ny >= 0) ? 'bottom' : 'top';
+  ctx.fillText(formatValue('%.3F', val), cx + pos.nx * R, cy - pos.ny * R);
+}
+
+drawComplexGrid(ctx, graph) {
   const { MARKER_DASH, MARKER_LINE, GRID_LINE } = GRAPH_CONST;
+  const { cx, cy, R } = this.bounds;
+  const info = MARKER_INFO[this.trace.smithFormat] || MARKER_INFO.RX;
+  const params = info.params;
+
+  ctx.strokeStyle = graph.getCSSColor('--plot-grid');
+  ctx.lineWidth = GRID_LINE;
+
+  ctx.beginPath(); this.drawCircle(ctx, cx, cy, R); ctx.stroke();
+  if (!params) return;
+
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
-  ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
-  ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = GRID_LINE;
-  ctx.font = graph.getFont('axis-label');
 
   ctx.beginPath();
-  [0.2, 0.4, 0.6, 0.8, 1.0].forEach(mag => { 
-    this.drawCircle(ctx, cx, cy, R * mag, 0, 2 * Math.PI);
-    ctx.fillText(mag, cx + R * mag - 10, cy - 4);
-  } );
-  [0, Math.PI / 6, Math.PI / 3, Math.PI / 2, -Math.PI / 6, -Math.PI / 3].forEach(angle => {
-    this.drawLine(ctx, cx + R * Math.cos(angle), cy - R * Math.sin(angle), cx - R * Math.cos(angle), cy + R * Math.sin(angle));
-  });
+  for (const val of params.gridRe) this.drawComplexShape(ctx, params.reCircle(val));
+  for (const val of params.gridIm) this.drawComplexShape(ctx, params.imCircle(val));
   ctx.stroke();
 
   const activeColor = graph.getCSSColor('--marker-active');
   const inactiveColor = graph.getCSSColor('--marker-inactive');
   ctx.setLineDash(MARKER_DASH);
-  for (const marker of this.cachedMarkers)
+  for (const marker of this.cachedMarkers) {
     for (const m of marker.points) {
       ctx.beginPath();
-      const isSelected = m.idx === graph.selectedMarkerIndex;
-      ctx.strokeStyle = isSelected ? activeColor : inactiveColor; ctx.lineWidth = MARKER_LINE;
-      this.drawCircle(ctx, cx, cy, VNA_MATH.linear(m.value) * R);
+      ctx.strokeStyle = (m.idx === graph.selectedMarkerIndex) ? activeColor : inactiveColor;
+      ctx.lineWidth = MARKER_LINE;
+      this.drawComplexShape(ctx, params.reCircle(info.calcRe(m.value)));
+      this.drawComplexShape(ctx, params.imCircle(info.calcIm(m.value)));
       ctx.stroke();
     }
+  }
   ctx.setLineDash([]);
   ctx.restore();
-}
 
-drawSmithRLine(ctx, v, admit) {
-  if (v < 0) return;
-  const { cx, cy, R } = this.bounds;
-  let r = R / (v + 1); if (admit) r = -r;
-  this.drawCircle(ctx, cx + v*r, cy, r);
-}
-
-drawSmithXLine(ctx, v, admit) {
-  const { cx, cy, R } = this.bounds;
-  if (Math.abs(v) < 0.001) {this.drawLine(ctx, cx - R, cy, cx + R, cy); return;}
-  const m = admit ? -R : R, x = m / v;
-  this.drawCircle(ctx, cx + m, cy - x, x);
-}
-
-drawSmithLines(ctx, value, admit) {
-  const z = admit
-   ? { re: VNA_MATH.conductance(value) * VNA_MATH.Z0, im: VNA_MATH.susceptance(value) * VNA_MATH.Z0}
-   : { re: VNA_MATH.resistance(value) / VNA_MATH.Z0, im: VNA_MATH.reactance(value) / VNA_MATH.Z0};
-  this.drawSmithRLine(ctx, z.re, admit);
-  this.drawSmithXLine(ctx, z.im, admit);
-}
-
-drawSmithGrid(ctx, graph) {
-  const { MARKER_DASH, MARKER_LINE, GRID_LINE } = GRAPH_CONST;
-  const { cx, cy, R  } = this.bounds;
-  const { typeDef } = this.trace;
-  const info = MARKER_INFO[this.trace.smithFormat] || MARKER_INFO['RX'];
-  const isAdmit = !!info.admit;
-
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
-  ctx.beginPath();
-  ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = GRID_LINE;
-  [0, 0.2, 0.5, 1, 2, 5].forEach(x => {
-    this.drawSmithRLine(ctx, x, isAdmit);
-    this.drawSmithXLine(ctx, x, isAdmit);
-    this.drawSmithXLine(ctx,-x, isAdmit);
-  });
-  ctx.stroke();
-
-  const activeColor = graph.getCSSColor('--marker-active');
-  const inactiveColor = graph.getCSSColor('--marker-inactive');
-  ctx.setLineDash(MARKER_DASH);
-  for (const marker of this.cachedMarkers)
-    for (const m of marker.points) {
-      ctx.beginPath();
-      const isSelected = m.idx === graph.selectedMarkerIndex;
-      ctx.strokeStyle = isSelected ? activeColor : inactiveColor; ctx.lineWidth = MARKER_LINE;
-      this.drawSmithLines(ctx, m.value, isAdmit);
-      ctx.stroke();
-    }
-  ctx.setLineDash([]);
-  ctx.restore();
-  if (info.values !== true) return;
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
   ctx.font = graph.getFont('axis-label');
-  ctx.beginPath();
-
-  const r = isAdmit ? -R : R;
-  [0.2, 0.5, 1, 2, 5].forEach(x => {
-    const sRe = { re: (x - 1) / (x + 1), im: 0 };
-    const valRe = info.calcRe(sRe);
-    ctx.fillText(formatValue('%.3F', valRe), cx - R + 2 * R * x / (x + 1) + 4, cy - 4);
-    const re = (x * x - 1) / (x * x + 1), im = (2 * x) / (x * x + 1);
-    const imTop = info.calcIm({re: re, im: im});
-    const imBot = info.calcIm({re: re, im:-im});
-    const xP = cx + R * re;
-    ctx.textAlign = (xP < cx) ? 'right' : 'left';
-    ctx.fillText(formatValue('%.3F', imTop), xP, cy - R * im);
-    ctx.fillText(formatValue('%.3F', imBot), xP, cy + R * im);
-  });
-  ctx.textAlign = 'right'; ctx.fillText('0', cx - r-5, cy);
-  ctx.textAlign = 'left';  ctx.fillText('∞', cx + r+5, cy);
-  ctx.stroke();
+  for (const val of params.gridRe) this.drawComplexLabel(ctx, val, params.reLabel(val));
+  for (const val of params.gridIm) this.drawComplexLabel(ctx, val, params.imLabel(val));
+  if (params.edgeLabels) for (const l of params.edgeLabels) this.drawComplexLabel(ctx, l.val, l);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
 }
 
 clipLineToRect(p1, p2, rect) {
@@ -509,25 +456,36 @@ drawCursorInfo(ctx, graph) {
   if (mouse.x < left || mouse.x > right || mouse.y > bottom || mouse.y < top) return;
 
   if (this.rad) {
-    const nearest = this.findNearestInCache(mouse.x, mouse.y, MARKER_PICKUP_RADIUS, this.cachedPoints);
+    const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedPoints);
     if (!nearest) return;
     const { point, slot, channel } = nearest;
-    const isAdmit = MARKER_INFO[smithFormat].admit || 0;
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
-    ctx.strokeStyle = graph.getCSSColor('--cursor-line'); ctx.lineWidth = CURSOR_LINE;
-    ctx.setLineDash(CURSOR_DASH);
-    ctx.beginPath();
-    if (this.rad == 1) this.drawSmithLines(ctx, point.value, isAdmit);
-    else this.drawCircle(ctx, cx, cy, VNA_MATH.linear(point.value) * R);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
+    const info = MARKER_INFO[smithFormat] || MARKER_INFO.RX;
+    const params = info.params;
 
-    ctx.beginPath();
-    ctx.strokeStyle = graph.getCSSColor('--bg'); ctx.lineWidth = DOT_LINE;
+    if (params) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
+      ctx.strokeStyle = graph.getCSSColor('--cursor-line');
+      ctx.lineWidth = CURSOR_LINE;
+      ctx.setLineDash(CURSOR_DASH);
+      ctx.beginPath();
+      const re = info.calcRe(point.value), im = info.calcIm(point.value);
+      this.drawComplexShape(ctx, params.reCircle(info.calcRe(point.value)));
+      this.drawComplexShape(ctx, params.imCircle(info.calcIm(point.value)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+//      ctx.fillStyle = graph.getCSSColor('--tooltip-text');
+//      ctx.font = graph.getFont('axis-label');
+//      this.drawComplexLabel(ctx, re, params.reLabel(re));
+//      this.drawComplexLabel(ctx, im, params.imLabel(im));
+    }
+
+    ctx.strokeStyle = graph.getCSSColor('--bg'); 
+    ctx.lineWidth = DOT_LINE;
     ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel);
-    this.drawCircle(ctx, point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
     ctx.stroke();
 
     const infoLines = [`Freq: ${formatFreqValue(point.freq)}`];
@@ -548,8 +506,10 @@ drawCursorInfo(ctx, graph) {
     for (const entry of this.cachedPoints) {
       const interp = interpolatePoint(entry.points, cursorFreq);
       if (!interp) continue;
-      ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
-      ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      if (interp.y <= bottom && interp.y >= top) {
+        ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
+        ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      }
       const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
       const valText = formatValue(typeDef.f, interp.value);
       infoLines.push(`${slotName}: ${valText}`);
