@@ -525,7 +525,7 @@ const COMPLEX_PARAMS = {
   gridIm: [-200, -130, -50, -25, 0, 25, 50, 100, 130, 200],
   reCircle(R) { const v = (R + 2 * VNA_MATH.Z0); return Math.abs(v) < 0.1 ? V_AXIS : { cx: VNA_MATH.Z0 / v, cy: 0, r: VNA_MATH.Z0 / v }; },
   reLabel(R)  { const v = R / (2 * VNA_MATH.Z0) + 1; return  (Math.abs(v) >= 1) ? { nx: 1/v, ny: 0 } : { nx: v, ny: Math.sqrt(1 - v*v) }; },
-  imCircle(X) { const v =-VNA_MATH.Z0 / X; return Math.abs(v) < 1e-2 ? H_AXIS : { cx: 0, cy: v, r: v }; },
+  imCircle(X) { const v =-VNA_MATH.Z0 / X; return Math.abs(v) > 100 ? H_AXIS : { cx: 0, cy: v, r: v }; },
   imLabel(X)  { const v = - X / (2 * VNA_MATH.Z0); return Math.abs(v) >= 1 ? { nx: 0, ny: 1/v } : { nx: Math.sqrt(1 - v*v), ny: v }; },
  },
  // ---- S21 Shunt ----
