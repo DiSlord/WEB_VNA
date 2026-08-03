@@ -1,10 +1,15 @@
 const VNA_MATH = {
  Z0: 50.0,
 
- // Вспомогательная: |S|^2
+ // Вспомогательные
  _l: (re, im) => (re * re + im * im),
+ _s11_r: (re, im, z) => Math.abs(2 * z * re / VNA_MATH._l(re, im) - z),
+ _s21_r: (re, im, z) =>  1 * z * re / VNA_MATH._l(re, im) - z,
+ _s11_x: (re, im, z) => -2 * z * im / VNA_MATH._l(re, im),
+ _s21_x: (re, im, z) => -1 * z * im / VNA_MATH._l(re, im),
+
  // LINEAR = |S|
- linear: (s) => Math.sqrt(VNA_MATH._l(s.re, s.im)),
+ linear: (s) => s.amp ?? Math.hypot(s.re, s.im),
 
  // LOGMAG = 20 * log10(|S|)
  logmag: (s) => 20 * Math.log10(VNA_MATH.linear(s)),
@@ -12,39 +17,35 @@ const VNA_MATH = {
  // PHASE = atan2(im, re) * 180 / PI
  phase: (s) => Math.atan2(s.im, s.re) * 180 / Math.PI,
 
+ // PHASE_UNWRAP = развёрнутая фаза в градусах.
+ phase_unwrap: (s) => (s.phase ?? Math.atan2(s.im, s.re)) * 180 / Math.PI,
+
  // REAL
  real: (s) => s.re,
 
  // IMAG
  imag: (s) => s.im,
+
  // SWR = (1 + |S|) / (1 - |S|)
  swr: (s) => { const x = VNA_MATH.linear(s); return x > 0.99 ? Infinity : (1.0 + x) / (1.0 - x); },
 
  // RESISTANCE (R) = Z0 * (1 - |Γ|²) / |1 - Γ|²
- resistance: (s) => {
-   const mag2 = VNA_MATH._l(s.re, s.im);
-   const denom = VNA_MATH._l(1 - s.re, s.im);
-   return denom === 0 ? Infinity : VNA_MATH.Z0 * (1 - mag2) / denom;
- },
+ resistance: (s) => VNA_MATH._s11_r(1 - s.re, -s.im, VNA_MATH.Z0),
 
  // REACTANCE (X) = -2 * Z0 * Im(Γ) / |1 - Γ|²
- reactance: (s) => {
-   const re = 1.0 - s.re, im = -s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? Infinity : -2 * VNA_MATH.Z0 * im / l;
- },
+ reactance: (s) => VNA_MATH._s11_x(1 - s.re, -s.im, VNA_MATH.Z0),
 
  // |Z| = Z0 * sqrt( ((1+re)^2 + im^2) / ((1-re)^2 + im^2) )
  mod_z: (s) => {
-   const num = VNA_MATH._l(1.0 + s.re, s.im);
-   const den = VNA_MATH._l(1.0 - s.re, s.im);
+   const num = VNA_MATH._l(1 + s.re, s.im);
+   const den = VNA_MATH._l(1 - s.re, s.im);
    return VNA_MATH.Z0 * Math.sqrt(num / den);
  },
 
  // Z PHASE = atan2(2 * im, 1 - |Γ|²) * 180 / PI
  phase_z: (s) => {
-   const r = 1.0 - VNA_MATH._l(s.re, s.im);
-   const x = 2.0 * s.im;
+   const r = 1 - VNA_MATH._l(s.re, s.im);
+   const x = 2 * s.im;
    return Math.atan2(x, r) * 180 / Math.PI;
  },
 
@@ -63,99 +64,53 @@ const VNA_MATH = {
  },
 
  // CONDUCTANCE (G) = 2 / Z0 * Re(1 + Γ) / |1 + Γ|² - 1/Z0
- conductance: (s) => {
-   const z0_inv = 1.0 / VNA_MATH.Z0;
-   const re = 1.0 + s.re, im = s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? Infinity : 2 * z0_inv * re / l - z0_inv;
- },
+ conductance: (s) => VNA_MATH._s11_r(1 + s.re, s.im, 1 / VNA_MATH.Z0),
 
  // SUSCEPTANCE (B) = -2 / Z0 * Im(1 + Γ) / |1 + Γ|²
- susceptance: (s) => {
-   const z0_inv = 1.0 / VNA_MATH.Z0;
-   const re = 1.0 + s.re, im = s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? Infinity : -2 * z0_inv * im / l;
- },
+ susceptance: (s) => VNA_MATH._s11_x(1 + s.re, s.im, 1 / VNA_MATH.Z0),
+
  // PARALLEL R = 1 / G
- parallel_r: (s) => {
-   const g = VNA_MATH.conductance(s);
-   return g === 0 ? Infinity : 1.0 / g;
- },
+ parallel_r: (s) => 1 / VNA_MATH.conductance(s),
 
  // PARALLEL X = -1 / B
- parallel_x: (s) => {
-   const b = VNA_MATH.susceptance(s);
-   return b === 0 ? Infinity : -1.0 / b;
- },
+ parallel_x: (s) => -1 / VNA_MATH.susceptance(s),
 
  // PARALLEL C = B / ω
- parallel_c: (s, freq) => {
-   const yi = VNA_MATH.susceptance(s);
-   const w = 2 * Math.PI * freq;
-   return yi / w;
- },
+ parallel_c: (s, freq) => VNA_MATH.susceptance(s) / (2 * Math.PI * freq),
 
  // PARALLEL L = Xp / ω
- parallel_l: (s, freq) => {
-   const xp = VNA_MATH.parallel_x(s);
-   const w = 2 * Math.PI * freq;
-   return xp / w;
- },
+ parallel_l: (s, freq) => VNA_MATH.parallel_x(s) / (2 * Math.PI * freq),
 
  // |Y| = 1 / |Z|
- mod_y: (s) => {
-   const z = VNA_MATH.mod_z(s);
-   return 1.0 / z;
- },
+ mod_y: (s) =>  1 / VNA_MATH.mod_z(s),
 
  // Q FACTOR = |2 * Im(Γ) / (1 - |Γ|²)|
- qualityfactor: (s) => {
-   const r = 1.0 - VNA_MATH._l(s.re, s.im);
-   const x = 2.0 * s.im;
-   return r === 0 ? Infinity : Math.abs(x / r);
- },
+ qualityfactor: (s) => Math.abs(2 * s.im / (1 - VNA_MATH._l(s.re, s.im))),
 
  // --- S21 Specific Calculations ---
  // S21 SERIES R = 2 * Z0 * Re(S21) / |S21|² - 2 * Z0
- s21series_r: (s) => {
-   const l = VNA_MATH._l(s.re, s.im);
-   return l === 0 ? 0 : (2 * VNA_MATH.Z0 * s.re / l) - (2 * VNA_MATH.Z0);
- },
+ s21series_r: (s) => VNA_MATH._s21_r(s.re, s.im, 2 * VNA_MATH.Z0),
 
  // S21 SERIES X = -2 * Z0 * Im(S21) / |S21|²
- s21series_x: (s) => {
-   const l = VNA_MATH._l(s.re, s.im);
-   return l === 0 ? Infinity : -2 * VNA_MATH.Z0 * s.im / l;
- },
+ s21series_x: (s) => VNA_MATH._s21_x(s.re, s.im, 2 * VNA_MATH.Z0),
 
  // S21 SERIES |Z| = 2*Z0 * sqrt(|1-S21|² / |S21|²)
  s21series_z: (s) => {
-   const num = VNA_MATH._l(1.0 - s.re, s.im);
+   const num = VNA_MATH._l(1 - s.re, s.im);
    const l = VNA_MATH._l(s.re, s.im);
    return l === 0 ? Infinity : 2 * VNA_MATH.Z0 * Math.sqrt(num / l);
  },
 
  // S21 SHUNT R = 0.5*Z0 * Re(1 - S21) / |1 - S21|² - 0.5 * Z0
- s21shunt_r: (s) => {
-   const re = 1.0 - s.re;
-   const im = -s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? Infinity : (0.5 * VNA_MATH.Z0 * re / l) - (0.5 * VNA_MATH.Z0);
- },
+ s21shunt_r: (s) => VNA_MATH._s21_r(1 + s.re, -s.im, VNA_MATH.Z0 / 2),
 
  // S21 SHUNT X = -0.5*Z0 * Im(1 - S21) / |1 - S21|²
- s21shunt_x: (s) => {
-   const re = 1.0 - s.re;
-   const im = -s.im;
-   const l = VNA_MATH._l(re, im);
-   return l === 0 ? Infinity : -0.5 * VNA_MATH.Z0 * im / l;
- },
+ s21shunt_x: (s) => VNA_MATH._s21_x(1 + s.re, -s.im, VNA_MATH.Z0 / 2),
 
  // S21 SHUNT |Z| = 0.5*Z0 * sqrt(|S21|² / |1 - S21|²)
  s21shunt_z: (s) => {
    const num = VNA_MATH._l(s.re, s.im);
-   const l = VNA_MATH._l(1.0 - s.re, s.im);
+   const l = VNA_MATH._l(1 - s.re, s.im);
    return l === 0 ? Infinity : 0.5 * VNA_MATH.Z0 * Math.sqrt(num / l);
  },
 
@@ -176,7 +131,56 @@ const VNA_MATH = {
    const delta_f = freqs[next] - freqs[prev];
    if (delta_f === 0) return 0;
    return Math.atan2(im_val, r) / (2 * Math.PI * delta_f);
- }
+ },
+
+ addPolarData: function(data) {
+  const n = data.length;
+  if (n === 0) return;
+  const PI = Math.PI, TWO_PI = 2 * PI;
+  for (let i = 0, prevRaw, phase; i < n; i++) {
+    const { re, im } = data[i];
+    const currRaw = Math.atan2(im, re);
+    if (i === 0) phase = currRaw;
+    else {
+      let diff = currRaw - prevRaw;
+      if (diff > PI) diff -= TWO_PI;
+      else if (diff < -PI) diff += TWO_PI;
+      phase += diff;
+    }
+    data[i].amp = Math.hypot(re, im);
+    data[i].phase = phase;
+    prevRaw = currRaw;
+  }
+ },
+
+/**
+ * Интерполяция комплексного значения в полярных координатах.
+ * @param {Array}  data       - массив {re, im, [phase]}
+ * @param {Array}  freqs      - массив частот (синхронный с sData)
+ * @param {number} f          - целевая частота
+ * @returns {{re: number, im: number}|null}
+ */
+ interpPolar: function(data, freqs, f) {
+  const N = freqs.length;
+  if (N === 0) return null;
+  if (N === 1) return { re: data[0].re, im: data[0].im };
+  // Экстраполяция за границы
+  if (f <= freqs[0] || f >= freqs[N-1]) return null;
+  // Бинарный поиск O(log N)
+  let lo = 0, hi = N - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (freqs[mid] <= f) lo = mid; else hi = mid;
+  }
+  const a1 = Math.hypot(data[lo].re, sData[lo].im), p1 = data[lo].phase;
+  const a2 = Math.hypot(data[hi].re, sData[hi].im), p2 = data[hi].phase;
+
+  const t = (f - freqs[lo]) / (freqs[hi] - freqs[lo]);
+  const a = a1 + t * (a2 - a1);
+  const p = p1 + t * (p2 - p1);
+
+  return { re: a * Math.cos(p), im: a * Math.sin(p) };
+ },
 };
 
 /**
@@ -362,8 +366,16 @@ function getValue(text) {
   return NaN;
 }
 
+function formatDistance(d, precision = 0) {
+  return _formatPFloat(d, precision) + 'm';
+}
+
+function formatTime(t, precision = 0) {
+  return _formatPFloat(t, precision) + 's';
+}
+
 function formatFreqValue(freq, precision = 0) {
-  return formatValue(`%.${precision}qHz`, freq);
+  return _formatFreq(freq, precision) + 'Hz';
 }
 
 /**
@@ -422,8 +434,9 @@ const TRACE_TYPES = {
   // --- Общие для всех 4 каналов ---
   LOGMAG: { name: 'Logmag',    f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: VNA_MATH.logmag },
   PHASE:  { name: 'Phase',     f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: VNA_MATH.phase },
+  UPHASE: { name: 'Phase ⟲',   f: '%.3F°',  valid: CH_ALL, top: 720, bottom: -720, calc: VNA_MATH.phase_unwrap },
   DELAY:  { name: 'Delay',     f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
-  LINEAR: { name: 'Linear'   , f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0, },
+  LINEAR: { name: 'Linear',    f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0, },
   REAL:   { name: 'Real',      f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.real  },
   IMAG:   { name: 'Imaginary', f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.imag  },
 
@@ -572,3 +585,175 @@ function formatSmithValue(type, freq, value) {
   }
   return formatValue(info.fmt, v.re, v.im) + suffix;
 }
+
+// ============================================
+// IFFT (ненормированное, radix-2)
+// ============================================
+VNA_MATH.fft = function(data, inverse) {
+  const N = data.length >> 1;
+  if (N <= 1) return;
+  
+  const levels = Math.log2(N) | 0;
+  
+  // Bit-reversal permutation
+  for (let i = 0; i < N; i++) {
+    const j = VNA_MATH._reverseBits(i, levels);
+    if (j > i) {
+      let t = data[2*i]; data[2*i] = data[2*j]; data[2*j] = t;
+      t = data[2*i+1]; data[2*i+1] = data[2*j+1]; data[2*j+1] = t;
+    }
+  }
+  
+  // Cooley-Tukey
+  for (let size = 2; size <= N; size <<= 1) {
+    const half = size >> 1;
+    const step = N / size;
+    for (let i = 0; i < N; i += size) {
+      for (let j = i, k = 0; j < i + half; j++, k += step) {
+        const ang = (inverse ? 2 : -2) * Math.PI * k / N;
+        const wR = Math.cos(ang), wI = Math.sin(ang);
+        const b = j + half;
+        const tR = data[2*b] * wR - data[2*b+1] * wI;
+        const tI = data[2*b] * wI + data[2*b+1] * wR;
+        data[2*b]   = data[2*j] - tR;
+        data[2*b+1] = data[2*j+1] - tI;
+        data[2*j]   += tR;
+        data[2*j+1] += tI;
+      }
+    }
+  }
+};
+
+VNA_MATH._reverseBits = function(val, width) {
+  let r = 0;
+  for (let i = 0; i < width; i++, val >>= 1) r = (r << 1) | (val & 1);
+  return r;
+};
+
+// ============================================
+// Вспомогательные функции для окна Кайзера
+// ============================================
+const I0_COEFF = [
+  2.5000000000000000e-1,  // n=2
+  2.7777777777777777e-2,  // n=3
+  1.7361111111111111e-3,  // n=4
+  6.9444444444444444e-5,  // n=5
+  1.9290123456790123e-6,  // n=6
+  3.9367598891408415e-8,  // n=7
+  6.1511873267825650e-10, // n=8
+  7.5940584281266230e-12, // n=9
+  7.5940584281266230e-14, // n=10
+  6.2760813455591930e-16, // n=11
+  4.3583898233049950e-18  // n=12
+];
+function bessel_I0_ext(z) {
+  let ret = I0_COEFF[I0_COEFF.length - 1];
+  for (let i = I0_COEFF.length - 2; i >= 0; i--) ret = I0_COEFF[i] + z * ret;
+  return z * (z * ret + 1.0) + 1.0;
+}
+
+function kaiser_window_ext(k, n, beta) {
+  if (beta === 0) return 1.0;
+  n = n - 1;
+  const z = (k * (n - k) * beta * beta) / (n * n);
+  return bessel_I0_ext(z);
+}
+
+// ============================================
+// Основное TD преобразование (окно Кайзера)
+// ============================================
+const KAISER_BETA = { minimum: 0, normal: 6, maximum: 13 };
+VNA_MATH.performTD = function(freqs, sData, td) {
+  const N = freqs.length;
+  if (N < 2) return { frequencies: [], values: [], _M: 0, _df: 0 };
+
+  const df     = (freqs[N-1] - freqs[0]) / (N - 1);
+  const isLP   = td.mode !== 'bandpass';
+
+  const iterp = 4;
+  const FFT_SIZE = (1 << Math.ceil(Math.log2(isLP ? 2 * N : N))) * iterp;
+
+  const buf = new Float64Array(2 * FFT_SIZE);
+
+  // ---- 1. Параметры окна ----
+  const offset = isLP ? N : 0;
+  const window_size = N + offset;
+  const beta = KAISER_BETA[td.window] ?? 0;
+
+  // ---- 2. Расчёт масштаба (по аналогии с C-кодом) ----
+  let scale = 0;
+  if (td.mode === 'lowpass_step') { // Для step: window_scale = 1 / (FFT_SIZE * I0(beta))
+    scale = FFT_SIZE * bessel_I0_ext(beta * beta / 4.0);
+  } else { // Для bandpass и impulse: компенсируем потерю энергии окна
+    for (let i = 0; i < N; i++) scale += kaiser_window_ext(i + offset, window_size, beta);
+    if (td.mode === 'lowpass_impulse') scale *= 2.0; // учёт эрмитовой симметрии
+  }
+  scale = 1.0 / scale;
+
+  const interpS = function(f) {
+    const n = freqs.length;
+    if (n === 0) return null;
+    if (n === 1) return { re: sData[0].re, im: sData[0].im };
+    let lo, hi;
+    // Выбор интервала для интерполяции / экстраполяции
+    if (f <= freqs[0]) { lo = 0; hi = 1; }
+    else if (f >= freqs[n - 1]) { lo = n - 2; hi = n - 1; }
+    else {
+      lo = 0; hi = n - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (freqs[mid] <= f) lo = mid;
+        else hi = mid;
+      }
+    }
+    // Единая формула линейной интерполяции / экстраполяции
+    const df = (freqs[hi] - freqs[lo]);
+    const t = df !== 0 ? (f - freqs[lo]) / df : 0;
+    const a = sData[lo].amp + t * (sData[hi].amp - sData[lo].amp);
+    const p = sData[lo].phase + t * (sData[hi].phase - sData[lo].phase);
+    return { re: a * Math.cos(p), im: a * Math.sin(p) };
+  };
+
+  // ---- 3. Заполнение спектра (применяем окно и масштаб) ----
+  if (isLP) { // — интерполяция по исходным данным к DC
+    for (let i = 0; i < N; i++) {
+      const S = interpS(df * i);
+      const w = kaiser_window_ext(i + offset, window_size, beta) * scale;
+      buf[2*i]   = S.re * w;
+      buf[2*i+1] = S.im * w;
+    }
+    buf[0] = Math.hypot(buf[0], buf[1]) // DC amplitude only
+    buf[1] = 0;
+    buf[2 * (FFT_SIZE / 2) + 1] = 0;    // Найквист imag = 0
+    for (let i = 1; i < N; i++) {
+      buf[2*(FFT_SIZE-i)  ] =  buf[2*i  ];
+      buf[2*(FFT_SIZE-i)+1] = -buf[2*i+1];
+    }
+  } else {
+    for (let i = 0; i < N; i++) {
+      const w = kaiser_window_ext(i + offset, window_size, beta) * scale;
+      buf[2 * i]     = sData[i].re * w;
+      buf[2 * i + 1] = sData[i].im * w;
+    }
+  }
+
+  // ---- 4. Обратное БПФ (без нормировки) ----
+  VNA_MATH.fft(buf, true);
+
+  // ---- 5. Integrate для lowpass step ----
+  if (td.mode === 'lowpass_step') {
+    for (let i = 1; i < FFT_SIZE; i++) {
+      buf[2 * i    ] += buf[2 * (i - 1)    ];
+      buf[2 * i + 1] += buf[2 * (i - 1) + 1];
+    }
+  }
+
+  // ---- 6. Формирование результата ----
+  const frequencies = new Array(FFT_SIZE);
+  const values = new Array(FFT_SIZE);
+  for (let n = 0; n < FFT_SIZE; n++) {
+    values[n] = { re: buf[2 * n], im: buf[2 * n + 1] };
+    frequencies[n] = (freqs[N - 1] - freqs[0]) * n / (FFT_SIZE - 1);
+  }
+  return { frequencies, values, _M: FFT_SIZE, _df: df };
+};

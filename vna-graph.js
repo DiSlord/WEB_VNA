@@ -1,5 +1,5 @@
 const GRAPH_CONST = {
- AREA: { left: 55, right: 25, top: 35, bottom: 25 },
+ AREA: { left: 55, right: 25, top: 32, bottom: 25 },
  MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
  MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3, DOT_LINE: 1,
  MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
@@ -28,6 +28,16 @@ constructor(region) {
   this.cachedPoints = [];
   this.cachedMarkers = [];
   this.cachedMarkerLines = [];
+  // Time Domain settings
+  this.td = {
+    enabled: false,
+    dirty: true,
+    mode: 'bandpass',        // 'bandpass' | 'lowpass_step' | 'lowpass_impulse'
+    window: 'minimum',       // 'minimum' | 'normal' | 'maximum'
+    velocityFactor: 0.66,
+    xAxisMode: 'time'        // 'time' | 'distance'
+  };
+  this.tdCache = [];         // Кэш IFFT-результата (пока пустой)
 }
 
 updateBounds(totalWidth, totalHeight) {
@@ -45,9 +55,9 @@ updateBounds(totalWidth, totalHeight) {
    bottom: b,
    width: r - l,
    height: b - t,
-   cx: Math.round((r + l) / 2 - 8) + 0.5,
+   cx: Math.round((r + l) / 2 - 3) + 0.5,
    cy: Math.round((b + t) / 2 + 3) + 0.5,
-   R:  Math.min(r - l - 8, b - t - 6) / 2,
+   R:  Math.min(r - l - 10, b - t - 6) / 2,
   };
   this.visible = this.region.rightPct > 0;
 }
@@ -82,6 +92,40 @@ setChannels(channelsObj) {
   this.trace.channels = typeDef ? mask & typeDef.valid : mask;
 }
 
+// Метод для установки TD-параметров с пометкой dirty при изменении
+setTD(settings) {
+  if (!settings) return;
+  for (const key of ['enabled', 'mode', 'window', 'velocityFactor', 'xAxisMode']) {
+    if (settings[key] !== undefined && this.td[key] !== settings[key]) {
+      this.td[key] = settings[key];
+      this.td.dirty = true;
+    }
+  }
+}
+
+freqToTime(freq) {
+  if (!this.td._M || !this.td._df) return 0;
+  const maxTime = (this.td._M - 1) / (this.td._M * this.td._df);
+  const f0 = this.td._f0, f1 = this.td._f1;
+  if (f1 === f0) return 0;
+  return ((freq - f0) / (f1 - f0)) * maxTime;
+}
+
+freqToDistance(freq) {
+  return this.freqToTime(freq) * 299792458 * this.td.velocityFactor / 2;
+}
+
+getX(freq) {
+  if (!this.td.enabled) return freq;
+  return this.td.xAxisMode === 'distance' ? this.freqToDistance(freq) : this.freqToTime(freq);
+}
+
+// Форматтер для вывода текста
+getXLabel(freq) {
+  if (!this.td.enabled) return formatFreqValue(freq);
+  return _formatPFloat(this.getX(freq), 3) + (this.td.xAxisMode === 'distance' ? 'm' : 's');
+}
+
 resetView(data) {
   const { typeDef } = this.trace;
   const f = data.getSlot(0, 'S11').freqs;
@@ -99,8 +143,8 @@ calculateCache(data, graph) {
   for (let slot = 0; slot < graph.visibility.length; slot++) {
     if (!graph.visibility[slot]) continue;
     for (const channel of channels) {
-      const slotData = data.getSlot(slot, channel);
-      if (!slotData || !slotData.freqs || slotData.freqs.length === 0) continue;
+      const slotData = data.getSlot(slot, channel, this.td);
+      if (!slotData) continue;
       const points = [];
       if (this.rad) {
         for (let i = 0; i < slotData.freqs.length; i++) {
@@ -230,18 +274,19 @@ drawHeader(ctx, graph) {
   const label = `[${channelNames}]  ${typeDef.name}${suffix ? ' (' + suffix + ')' : ''}`;
   ctx.textAlign = 'left';
   ctx.font = graph.getFont('axis');
-  ctx.fillText(label, left, top - 11);
+  ctx.fillText(label, left, top - 12);
 }
 
 drawGrid(ctx, graph) {
   const { left, right, top, bottom, width, height } = this.bounds;
-  const { xMin, xMax, yMin, yMax } = this.view;
+  let { xMin, xMax, yMin, yMax } = this.view;
   const { MIN_GRID_SPACING_PX, MIN_GRID_SPACING_PY, MARKER_DASH, MARKER_LINE, GRID_LINE, GRID_DASH } = GRAPH_CONST;
 
   ctx.strokeStyle = graph.getCSSColor('--plot-border');
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, width, height);
-
+  xMin = this.getX(xMin);
+  xMax = this.getX(xMax);
   const xTicks = getNiceTicks(xMin, xMax, MIN_GRID_SPACING_PX, width);
   const yTicks = getNiceTicks(yMin, yMax, MIN_GRID_SPACING_PY, height);
 
@@ -251,11 +296,12 @@ drawGrid(ctx, graph) {
 
   ctx.font = graph.getFont('axis-label');
   ctx.textAlign = 'center';
-  ctx.beginPath(); 
-  for (const freq of xTicks.ticks) {
-    const x = left + (freq - xMin) / (xMax - xMin) * width;
+  ctx.beginPath();
+  const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? '%.3Fm' : '%.3Fs') : '%.3qHz';
+  for (const tick of xTicks.ticks) {
+    const x = left + (tick - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
-    ctx.fillText(formatValue(`%.3qHz`, freq), x, bottom + 18);
+    ctx.fillText(formatValue(format, tick), x, bottom + 18);
   }
 
   const { typeDef } = this.trace;
@@ -337,6 +383,53 @@ drawComplexGrid(ctx, graph) {
   if (params.edgeLabels) for (const l of params.edgeLabels) this.drawComplexLabel(ctx, l.val, l);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
+}
+
+/**
+ * Рисует сегмент между двумя точками как дугу в полярных координатах
+ * относительно центра (cx, cy). Если угловая разница мала — рисует прямую.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} cx, cy       - центр полярной системы (центр диаграммы)
+ * @param {number} x1, y1       - предыдущая точка (пиксели)
+ * @param {number} x2, y2       - текущая точка (пиксели)
+ * @param {number} maxAngleStep - макс. угловой шаг, рад (0.1–0.2 — оптимально)
+ */
+drawPolarSegment(ctx, x1, y1, x2, y2, maxAngleStep = 0.15) {
+  const { cx, cy, R } = this.bounds;
+    const dx1 = x1 - cx, dy1 = y1 - cy;
+    const dx2 = x2 - cx, dy2 = y2 - cy;
+    const r1 = Math.hypot(dx1, dy1);
+    const r2 = Math.hypot(dx2, dy2);
+
+    // Точки вблизи центра или совпадающие — рисуем прямую
+    if (r1 < 1e-6 || r2 < 1e-6) {
+        ctx.lineTo(x2, y2);
+        return;
+    }
+
+    const a1 = Math.atan2(dy1, dx1);
+    const a2 = Math.atan2(dy2, dx2);
+
+    // Кратчайший путь по углу (unwrap на ±π)
+    let da = a2 - a1;
+    if (da >  Math.PI) da -= 2 * Math.PI;
+    if (da < -Math.PI) da += 2 * Math.PI;
+
+    // Малый угол — прямая (не плодим лишние точки)
+    if (Math.abs(da) < maxAngleStep) {
+        ctx.lineTo(x2, y2);
+        return;
+    }
+
+    // Разбиваем на дугу: линейная интерполяция радиуса и угла
+    const steps = Math.ceil(Math.abs(da) / maxAngleStep);
+    for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const r = r1 + t * (r2 - r1);
+        const a = a1 + t * da;
+        ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    }
 }
 
 clipLineToRect(p1, p2, rect) {
@@ -454,6 +547,7 @@ drawCursorInfo(ctx, graph) {
   const { typeDef, smithFormat } = this.trace;
   const { MARKER_PICKUP_RADIUS, CURSOR_DASH, CURSOR_DOT_RADIUS, DOT_LINE, CURSOR_LINE} = GRAPH_CONST;
   if (mouse.x < left || mouse.x > right || mouse.y > bottom || mouse.y < top) return;
+  const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? 'Distance: %.3Fm' : 'Time: %.3Fs') : 'Freq: %qHz';
 
   if (this.rad) {
     const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedPoints);
@@ -488,7 +582,7 @@ drawCursorInfo(ctx, graph) {
     ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
     ctx.stroke();
 
-    const infoLines = [`Freq: ${formatFreqValue(point.freq)}`];
+    const infoLines = [formatValue(format, this.getX(point.freq))];
     const slotName = slot === 0 ? channel : `M${slot} ${channel}`;
     const valText = formatSmithValue(smithFormat, point.freq, point.value);
     infoLines.push(`${slotName}: ${valText}`);
@@ -502,7 +596,7 @@ drawCursorInfo(ctx, graph) {
     ctx.setLineDash([]);
 
     ctx.strokeStyle = graph.getCSSColor('--bg'); ctx.lineWidth = DOT_LINE;
-    const infoLines = [`Freq: ${formatFreqValue(cursorFreq)}`];
+    const infoLines = [formatValue(format, this.getX(cursorFreq))];
     for (const entry of this.cachedPoints) {
       const interp = interpolatePoint(entry.points, cursorFreq);
       if (!interp) continue;

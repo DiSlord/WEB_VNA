@@ -10,7 +10,7 @@
  --btn-text: #ffffff;
  --btext: #00e000;
  --na_button: #252535;
- --connect: #2196F3;
+ --a_button: #2196F3;
  --flash: #028800;
  --verify: #ff8000;
  --save: #2196F3;
@@ -149,7 +149,7 @@ select:focus {
  padding-right: 5px;
 }
 
-.side-panel input {
+.side-panel input, .velocity {
  width: 100%;
  padding: 3px 6px;
  background: var(--bg);
@@ -194,7 +194,7 @@ select:focus {
 .top-bar button {
  background: var(--na_button);
  color: var(--btn-text);
- font:  var(--font-ui-btn);
+ font:  var(--font-ui);
  border: 1px solid var(--border);
  border-radius: 5px;
  cursor: pointer;
@@ -337,11 +337,14 @@ canvas {
 }
 .context-menu-item {
  font: var(--font-ui);
- padding: 4px 12px;
+ padding: 4px 8px;
  cursor: pointer;
  color: var(--text);
+ white-space: break-spaces;
  border-radius: 4px;
- transition: background 0.15s;
+ display: flex;
+ align-items: center;
+ height: 20px;
 }
 .context-menu-item.disabled {
  opacity: 0.4;
@@ -355,6 +358,12 @@ canvas {
  background: var(--error);
 }
 .menu-column { display: flex; flex-direction: column; }
+
+.velocity {
+ width: 60px;
+ height: 20px;
+}
+.velocity:focus { outline: none; border-color: var(--accent); }
 
 .area-panels {
  position: absolute;
@@ -370,7 +379,7 @@ canvas {
  background: var(--bg);
  color: var(--text);
  pointer-events: auto;
- height: 28px;
+ height: 24px;
  font: var(--font-ui-small);
  padding-left: 20px;
 }
@@ -395,10 +404,12 @@ canvas {
  padding: 1px 6px;
  border-radius: 3px;
  cursor: pointer;
+ height: 20px;
 }
 
 .area-panel .trace-type {
-  min-width: 110px;
-  text-align: left;
+ min-width: 110px;
+ text-align: left;
 }
+.area-panel button.active { background: var(--a_button); color: var(--bg); }
 .area-panel button:hover { border-color: var(--accent); }

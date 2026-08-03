@@ -55,7 +55,7 @@
    <div class="top-bar">
     <div class="bar-row">
      <button id="btn_copy" onclick="copyToClipboard()">📋Copy</button>
-     <label>Tiling:</label><select id="layoutSelect" onchange="changeLayout(this.value)"></select>
+     <button id="btnLayout" onclick="showLayoutDropdown(event)" title="Tiling">Tiling ▾</button>
     </div>
     <div class="bar-row"><label>Theme:</label><select id="themeSelect" onchange="changeTheme(this.value)"></select><button onclick="toggleFullscreen()">⛶</button></div>
    </div>
@@ -82,7 +82,7 @@ const themeSelect = $('themeSelect');
 const contextMenu = $('contextMenu');
 const fileInput = $('fileInput');
 const markerTable = $('markerTable');
-const layoutSelect = $('layoutSelect');
+const btnLayout = $('btnLayout');
 const areaPanels = $('areaPanels');
 const vnaCanvas = $('vnaCanvas');
 
@@ -186,15 +186,16 @@ let graph;
 // =============================
 //  Context menu
 // =============================
-function addMenuItem(menu, textContent, action, disabled = false) {
-  if (textContent === null) return;
+function addMenuItem(menu, innerHTML, action, disabled = false) {
+  if (innerHTML === null) return;
   const item = document.createElement('div');
   item.className = 'context-menu-item';
   if (action === 'clear') item.classList.add('danger');
-  item.textContent = textContent;
+  item.innerHTML = innerHTML;
   item.action = action;
   if (disabled) item.classList.add('disabled');
   menu.appendChild(item);
+  return item;
 }
 
 function addMenuColumn(menu) {
@@ -202,6 +203,14 @@ function addMenuColumn(menu) {
   column.className = 'menu-column';
   menu.appendChild(column);
   return column;
+}
+
+function prepareContextMenu(e, stayOpen = false) {
+  e.stopPropagation();
+  if (!stayOpen && isContextMenu()) { hideContextMenu(); return null; }
+  contextMenu.innerHTML = '';
+  contextMenu.stayOpen = stayOpen;
+  return contextMenu;
 }
 
 function showContextMenu(target) {
@@ -224,7 +233,7 @@ document.addEventListener('click', (e) => {
   const menuItem = e.target.closest('.context-menu-item');
   if (!menuItem || menuItem.classList.contains('disabled') || !menuItem.action) return;
   menuItem.action();
-  hideContextMenu(); 
+  if (!m.stayOpen) hideContextMenu(); 
 });
 
 document.addEventListener('touchstart', (e) => {
@@ -431,6 +440,7 @@ function updateMarkerTable() {
     if (idx === graph.selectedMarkerIndex) tr.classList.add('selected');
     tr.innerHTML = `<td style="width: 40px;">${idx + 1}</td><td>${formatFreqValue(marker.freq)}</td>`;
     tr.addEventListener('click', () => { graph.selectMarker(idx); });
+    tr.addEventListener('dblclick', (e) => { changeMarker(idx); });
     markerTable.appendChild(tr);
   });
 }
@@ -448,11 +458,8 @@ function setTraceType(target, area, type) {
 }
 
 function showTraceTypeDropdown(e, area) {
-  const m = contextMenu, target = e.target;
-  e.stopPropagation();
-  if (isContextMenu()) {hideContextMenu(); return;}
-  m.innerHTML = '';
-  const MAX_ROWS = 9;
+  const m = prepareContextMenu(e), MAX_ROWS = 9;
+  if (!m) return;
   const groups = {
     'ALL': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_ALL),
     'S11/S22': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
@@ -462,11 +469,11 @@ function showTraceTypeDropdown(e, area) {
     for (let i = 0; i < types.length; i += MAX_ROWS) {
       const chunk = types.slice(i, i + MAX_ROWS);
       const col = addMenuColumn(m);
-      addMenuItem(col, i == 0 ? groupName : '\u00A0', null, true);
-      chunk.forEach(typeKey => { addMenuItem(col, TRACE_TYPES[typeKey].name, () => { setTraceType(target, area, typeKey); }); });
+      addMenuItem(col, i == 0 ? groupName : ' ', null, true);
+      chunk.forEach(typeKey => { addMenuItem(col, TRACE_TYPES[typeKey].name, () => { setTraceType(e.target, area, typeKey); }); });
     }
   }
-  showContextMenu(target);
+  showContextMenu(e.target);
 }
 
 function buildAreaPanels() {
@@ -496,6 +503,13 @@ function buildAreaPanels() {
       graph.redraw(true);
     });
     panel.appendChild(smithSel);
+
+    const btnTD = document.createElement('button');
+    btnTD.textContent = 'TDR';
+    btnTD.title = 'Time Domain Transform';
+    btnTD.addEventListener('click', (e) => { showTDMenu(e, area); });
+    if (area.td.enabled) btnTD.classList.add('active');
+    panel.appendChild(btnTD);
 
     // Channels checkboxes
     ['S11', 'S21', 'S12', 'S22'].forEach(ch => {
@@ -581,6 +595,89 @@ function updateSmithFormatDropdown(panel, area) {
   }
 }
 
+
+function showTDMenu(e, area) {
+  const m = prepareContextMenu(e, true);
+  if (!m) return;
+  const target = e.target;
+  // === Колонка 1: Mode + Window ===
+  const col1 = addMenuColumn(m);
+  addMenuItem(col1, 'Mode:', null, true);
+  const modes = [
+    { key: 'bandpass', name: 'Bandpass' },
+    { key: 'lowpass_step', name: 'Lowpass Step' },
+    { key: 'lowpass_impulse', name: 'Lowpass Impulse' }
+  ];
+  modes.forEach(({ key, name }) => {
+    const check = area.td.mode === key ? '✓' : '   ';
+    addMenuItem(col1, `${check} ${name}`, () => {
+      area.setTD({ mode: key });
+      graph.redraw(true);
+      showTDMenu(e, area);
+    });
+  });
+
+  addMenuItem(col1, 'Window:', null, true);
+  const windows = ['minimum', 'normal', 'maximum'];
+  windows.forEach(win => {
+    const check = area.td.window === win ? '✓' : '   ';
+    const displayName = win[0].toUpperCase() + win.slice(1);
+    addMenuItem(col1, `${check} ${displayName}`, () => {
+      area.setTD({ window: win });
+      graph.redraw(true);
+      showTDMenu(e, area);
+    });
+  });
+  
+  // === Колонка 2: Velocity Factor + X-Axis + Enable ===
+  const col2 = addMenuColumn(m);
+  // Enable TD toggle
+  const enableCheck = area.td.enabled ? '✓' : '   ';
+  addMenuItem(col2, `${enableCheck} Enable TDR`, () => {
+    area.setTD({ enabled: !area.td.enabled });
+    target.classList.toggle('active', area.td.enabled);
+    graph.redraw(true);
+    showTDMenu(e, area);
+  });
+
+  addMenuItem(col2, 'X-Axis:', null, true);
+  const axisModes = [
+    { key: 'time', name: 'Time (s)' },
+    { key: 'distance', name: 'Distance (m)' }
+  ];
+  
+  axisModes.forEach(({ key, name }) => {
+    const check = area.td.xAxisMode === key ? '✓' : '   ';
+    addMenuItem(col2, `${check} ${name}`, () => {
+      area.setTD({ xAxisMode: key });
+      graph.redraw(true);
+      showTDMenu(e, area);
+    });
+  });
+
+  addMenuItem(col2, ' ', null, true);
+  // Velocity Factor — input
+  const html = `Velocity:  <input type="text" class="velocity" value="${area.td.velocityFactor}">`;
+  const vfInput = addMenuItem(col2, html, null).querySelector('input');
+
+  vfInput.addEventListener('change', () => {
+    const v = parseFloat(vfInput.value.replace(',', '.'));
+    if (v > 0 && v <= 1) {
+      area.setTD({ velocityFactor: v });
+      graph.redraw(true);
+    } else vfInput.value = area.td.velocityFactor;
+  });
+  vfInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      vfInput.blur();
+    }
+    e.stopPropagation();
+  });
+
+  showContextMenu(target);
+}
+
 // =============================
 // Select areas on canvas configuration
 // =============================
@@ -600,17 +697,21 @@ function getRegions(id) {
   return preset.regions.map(r => ({ leftPct: r[0], topPct: r[1], rightPct: r[2], bottomPct: r[3] }));
 }
 
-function initLayouts() {
-  layoutSelect.innerHTML = '';
-  LAYOUT_PRESETS.forEach((layout, index) => {
-    const opt = document.createElement('option');
-    opt.value = index;
-    opt.textContent = layout.name;
-    layoutSelect.appendChild(opt);
+function updateLayoutButtonText(id) {
+  btnLayout.layoutId = id;
+  btnLayout.innerHTML = `${LAYOUT_PRESETS[id].name} ▾`;
+}
+
+function showLayoutDropdown(e) {
+  const m = prepareContextMenu(e);
+  if (!m) return;
+  const col = addMenuColumn(m);
+  LAYOUT_PRESETS.forEach((layout, id) => {
+    const check = id == btnLayout.layoutId ? '✓' : '   ';
+    const displayName = `${layout.icon} ${check}${layout.name}`;
+    addMenuItem(col, `${check} ${layout.name}`, () => {  changeLayout(id); });
   });
-  const id = localStorage.getItem('vna-layout') || 0;
-  layoutSelect.value = id;
-  changeLayout(id);
+  showContextMenu(e.target);
 }
 
 function changeLayout(layoutId) {
@@ -619,6 +720,13 @@ function changeLayout(layoutId) {
   localStorage.setItem('vna-layout', layoutId);
   graph.setRegions(regionsArray);
   buildAreaPanels();
+  updateLayoutButtonText(layoutId);
+}
+
+function initLayouts() {
+  const id = localStorage.getItem('vna-layout') || 0;
+  updateLayoutButtonText(id);
+  changeLayout(id);
 }
 
 // =============================

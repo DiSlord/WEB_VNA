@@ -7,47 +7,73 @@
 class VNAData {
 constructor(slotsCount = 5) {
   this.slots = [];
-  for (let i = 0; i < slotsCount; i++)
-    this.slots.push({ frequencies: [], S11: [], S21: [], S12: [], S22: [] });
+  this.td_slots = [];
+  for (let i = 0; i < slotsCount; i++) {
+    this.slots.push({ uid: 0, frequencies: [], S11: [], S21: [], S12: [], S22: [] });
+    this.td_slots.push({ uid: 0, td_key: 0, _M: 0, _df: 0, frequencies: [], S11: [], S21: [], S12: [], S22: [] });
+  }
 }
 
-getSlot(slot, channel) {
+static tdKey(td) {
+  const s = `${td.mode}|${td.window}|${td.velocityFactor}`;
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+setSlotData(slot, freqs, S11, S21, S12, S22) {
   const s = this.slots[slot];
-  if (!s) return { freqs: [], values: [] };
-  return { freqs: s.frequencies, values: s[channel] || [] };
+  if (freqs) s.frequencies = freqs;
+  if (S11) s.S11 = S11;
+  if (S21) s.S21 = S21;
+  if (S12) s.S12 = S12;
+  if (S22) s.S22 = S22;
+  s.uid++;
 }
 
-setSlotData(slot, freqs, S11, S21 = [], S12 = [], S22 = []) {
-  if (!this.slots[slot]) return;
-  this.slots[slot] = {
-   frequencies: freqs || [],
-   S11: S11 || [],
-   S21: S21 || [],
-   S12: S12 || [],
-   S22: S22 || []
-  };
-}
-
-copySlot(src, dst) {
-  const s = this.slots[src];
-  if (!s || !this.slots[dst]) return;
-  this.slots[dst] = {
-   frequencies: [...s.frequencies],
-   S11: [...s.S11], S21: [...s.S21],
-   S12: [...s.S12], S22: [...s.S22]
-  };
+copySlot(from, to) {
+  const src = this.slots[from];
+  const dst = this.slots[to];
+  dst.frequencies = [...src.frequencies];
+  dst.S11 = [...src.S11];
+  dst.S21 = [...src.S21];
+  dst.S12 = [...src.S12];
+  dst.S22 = [...src.S22];
+  dst.uid++;
 }
 
 clearSlot(slot) {
-  if (!this.slots[slot]) return;
-  this.slots[slot] = { frequencies: [], S11: [], S21: [], S12: [], S22: [] };
+  const s = this.slots[slot];
+  s.frequencies = []; s.S11 = []; s.S21 = []; s.S12 = []; s.S22 = [];
+  s.uid++;
 }
 
-clearAll() { this.slots.forEach((_, i) => this.clearSlot(i)); }
+// Единый интерфейс: всегда возвращает {freqs, values}
+// В частотном режиме: freqs = исходные частоты
+// В TD-режиме: freqs = виртуальные частоты длиной M (линейно отображаются на исходный диапазон)
+getSlot(slot, channel, td = null) {
+  const s = this.slots[slot];
+  const data = s && s[channel];
+  if (!data || data.length === 0) return { freqs: [], values: [] };
+  if (data[0].phase === undefined) VNA_MATH.addPolarData(data); // Add polar data fields
 
-getPointCount(slot = 0) {
-  if (!this.slots[slot]) return 0;
-  return this.slots[slot].frequencies.length;
+  if (!td || !td.enabled) return { freqs: s.frequencies, values: data || [] };
+  const tdCache = this.td_slots[slot];
+  const currentKey = VNAData.tdKey(td);
+  if (tdCache.uid !== s.uid || tdCache.td_key !== currentKey || tdCache[channel].length == 0) {
+    const result = VNA_MATH.performTD(s.frequencies, data, td);
+    tdCache.uid = s.uid;
+    tdCache.td_key = currentKey;
+    tdCache._M = result._M;
+    tdCache._df = result._df;
+    tdCache.frequencies = result.frequencies; // Виртуальные частоты длиной M
+    tdCache[channel] = result.values;
+  }
+  td._M = tdCache._M;
+  td._df = tdCache._df;
+  td._f0 = tdCache.frequencies[0];
+  td._f1 = tdCache.frequencies[tdCache.frequencies.length - 1];
+  return { freqs: tdCache.frequencies, values: tdCache[channel] || []  };
 }
 
 hasData(slot) {
