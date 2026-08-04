@@ -109,12 +109,14 @@ autoScale() {
   if (!this.cachedPoints || this.cachedPoints.length === 0 || this.rad) return;
   const { height } = this.bounds;
   const { typeDef } = this.trace;
+  const { xMin, xMax } = this.view;
   const { MIN_GRID_SPACING_PY } = GRAPH_CONST;
   let minY = Infinity;
   let maxY = -Infinity;
   for (const entry of this.cachedPoints) {
     if (!entry.points || entry.points.length === 0) continue;
     for (const p of entry.points) {
+      if (p.freq < xMin || p.freq > xMax) continue;
       if (p.value < minY) minY = p.value;
       if (p.value > maxY) maxY = p.value;
     }
