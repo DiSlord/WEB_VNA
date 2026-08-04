@@ -75,11 +75,13 @@ setTraceType(type) {
   // Reset Smith format
   if (!this.rad) return;
   const m = MARKER_INFO[this.trace.smithFormat].valid & typeDef.valid;
-  if (m == 0) this.setSmithFormat(typeDef.valid & CH_REFLECT ? 'RX' : 'LIN');
+  if (m == 0) this.setSmithFormat(typeDef.valid & CH_REFLECT ? 'RX' : 'SHUNT_RX');
 }
 
 setSmithFormat(format) {
- this.trace.smithFormat = format;
+  const info = MARKER_INFO[format];
+  if (!info || !(info.valid & this.trace.channels)) format = LIN;
+  this.trace.smithFormat = format;
 }
 
 setChannels(channelsObj) {
@@ -101,6 +103,31 @@ setTD(settings) {
       this.td.dirty = true;
     }
   }
+}
+
+autoScale() {
+  if (!this.cachedPoints || this.cachedPoints.length === 0 || this.rad) return;
+  const { height } = this.bounds;
+  const { typeDef } = this.trace;
+  const { MIN_GRID_SPACING_PY } = GRAPH_CONST;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const entry of this.cachedPoints) {
+    if (!entry.points || entry.points.length === 0) continue;
+    for (const p of entry.points) {
+      if (p.value < minY) minY = p.value;
+      if (p.value > maxY) maxY = p.value;
+    }
+  }
+  if (!isFinite(maxY)) maxY = typeDef.top;
+  if (!isFinite(minY)) minY = typeDef.bottom;
+  const dy = maxY - minY;
+  if (dy === 0) {maxY+=1; minY-=1;}
+  else {maxY+=dy*0.05; minY-=dy*0.05;}
+  const { ticks, step } = getNiceTicks(minY, maxY, MIN_GRID_SPACING_PY, height);
+  this.view.yMin = ticks[0] - step;
+  this.view.yMax = ticks[ticks.length - 1] + step;
+  if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
 }
 
 freqToTime(freq) {
@@ -748,15 +775,6 @@ setMarkerFreq(idx, freq) {
   if (idx < 0 || idx >= this.markers.length || isNaN(freq) || freq < 0) return;
   this.markers[idx].freq = Math.round(freq);
   this.updateMarkers();
-}
-
-changeSelectedMarker() {
-  const idx = this.selectedMarkerIndex;
-  if (idx < 0 || idx >= this.markers.length) return;
-  const marker = this.markers[idx];
-  const input = prompt(`Введите частоту для маркера M${idx + 1}:`, marker.freq);
-  if (input === null) return;
-  this.setMarkerFreq(idx, getValue(input));
 }
 
 removeSelectedMarker() {

@@ -172,10 +172,10 @@ const VNA_MATH = {
     const mid = (lo + hi) >> 1;
     if (freqs[mid] <= f) lo = mid; else hi = mid;
   }
-  const a1 = Math.hypot(data[lo].re, sData[lo].im), p1 = data[lo].phase;
-  const a2 = Math.hypot(data[hi].re, sData[hi].im), p2 = data[hi].phase;
+  const a1 = data[lo].amp, p1 = data[lo].phase, f1 = freqs[lo];
+  const a2 = data[hi].amp, p2 = data[hi].phase, f2 = freqs[hi];
 
-  const t = (f - freqs[lo]) / (freqs[hi] - freqs[lo]);
+  const t = (f - f1) / (f2 - f1);
   const a = a1 + t * (a2 - a1);
   const p = p1 + t * (p2 - p1);
 
@@ -436,7 +436,7 @@ const TRACE_TYPES = {
   PHASE:  { name: 'Phase',     f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: VNA_MATH.phase },
   UPHASE: { name: 'Phase ⟲',   f: '%.3F°',  valid: CH_ALL, top: 720, bottom: -720, calc: VNA_MATH.phase_unwrap },
   DELAY:  { name: 'Delay',     f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
-  LINEAR: { name: 'Linear',    f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0, },
+  LINEAR: { name: 'Linear',    f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0},
   REAL:   { name: 'Real',      f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.real  },
   IMAG:   { name: 'Imaginary', f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.imag  },
 

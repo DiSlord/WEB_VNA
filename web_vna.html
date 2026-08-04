@@ -206,16 +206,19 @@ function addMenuColumn(menu) {
 }
 
 function prepareContextMenu(e, stayOpen = false) {
+  const m = contextMenu;
+  m.innerHTML = '';
+  if (!e) return m;
   e.stopPropagation();
-  if (!stayOpen && isContextMenu()) { hideContextMenu(); return null; }
-  contextMenu.innerHTML = '';
-  contextMenu.stayOpen = stayOpen;
-  return contextMenu;
+  if (e.target === m.parent && isContextMenu()) { hideContextMenu(); return null; }
+  m.stayOpen = stayOpen;
+  m.parent = e.target;
+  return m;
 }
 
-function showContextMenu(target) {
-  const rect = target.getBoundingClientRect();
+function showContextMenu() {
   const m = contextMenu;
+  const rect = m.parent.getBoundingClientRect();
   m.style.display = 'flex';
   m.style.left = rect.left + 'px';
   m.style.top = (rect.bottom + window.scrollY + 3) + 'px';
@@ -316,9 +319,7 @@ function loadSnP(slot) { fileInput.slot = slot; fileInput.value = ''; fileInput.
 // Button context menu
 function showSlotMenu(e, slot) {
   e.preventDefault(); // Prevent Right click
-  e.stopPropagation();
-  const m = contextMenu;
-  m.innerHTML = '';
+  const m = prepareContextMenu(e);
   const col = addMenuColumn(m);
   if (slot === 0) {
     const hasData = vnaData.getSlot(0, 'S11').freqs.length > 0;
@@ -335,7 +336,7 @@ function showSlotMenu(e, slot) {
     addMenuItem(col, '💾 Export as S2P...', () => exportS2P(slot), !hasData);
     addMenuItem(col, '📂 Load SnP...', () => loadSnP(slot), false);
   }
-  showContextMenu(e.target);
+  showContextMenu();
 }
 
 function toggleTrace(slot) {
@@ -448,34 +449,6 @@ function updateMarkerTable() {
 // =============================
 // Area panel creation and sync
 // =============================
-function setTraceType(target, area, type) {
-  const panel = target.closest('.area-panel');
-  area.setTraceType(type);
-  updateTraceType(panel, area);
-  updateChannelCheckboxes(panel, area);
-  updateSmithFormatDropdown(panel, area);
-  graph.redraw(true);
-}
-
-function showTraceTypeDropdown(e, area) {
-  const m = prepareContextMenu(e), MAX_ROWS = 9;
-  if (!m) return;
-  const groups = {
-    'ALL': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_ALL),
-    'S11/S22': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
-    'S21/S12': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_THRU)
-  };
-  for (const [groupName, types] of Object.entries(groups)) {
-    for (let i = 0; i < types.length; i += MAX_ROWS) {
-      const chunk = types.slice(i, i + MAX_ROWS);
-      const col = addMenuColumn(m);
-      addMenuItem(col, i == 0 ? groupName : ' ', null, true);
-      chunk.forEach(typeKey => { addMenuItem(col, TRACE_TYPES[typeKey].name, () => { setTraceType(e.target, area, typeKey); }); });
-    }
-  }
-  showContextMenu(e.target);
-}
-
 function buildAreaPanels() {
   areaPanels.innerHTML = '';
   graph.areas.forEach((area, areaIdx) => {
@@ -490,19 +463,17 @@ function buildAreaPanels() {
     panel.style.width = ((r.rightPct - r.leftPct) * 100) + '%';
 
     // Dropdown TRACE_TYPES
-    const btn = document.createElement('button');
-    btn.className = 'trace-type';
-    btn.addEventListener('click', (e) => { showTraceTypeDropdown(e, area); });
-    panel.appendChild(btn);
+    const btnType = document.createElement('button');
+    btnType.className = 'trace-type';
+    btnType.addEventListener('click', (e) => { showTraceTypeDropdown(e, area); });
+    panel.appendChild(btnType);
 
     // Smith format select
-    const smithSel = document.createElement('select');
-    smithSel.className = 'smith-select';
-    smithSel.addEventListener('change', () => {
-      area.setSmithFormat(smithSel.value);
-      graph.redraw(true);
-    });
-    panel.appendChild(smithSel);
+    const btnSmith = document.createElement('button');
+    btnSmith.className = 'smith-format';
+    btnSmith.addEventListener('click', (e) => { showSmithFormatDropdown(e, area); });
+    panel.appendChild(btnSmith);
+
 
     const btnTD = document.createElement('button');
     btnTD.textContent = 'TDR';
@@ -528,6 +499,13 @@ function buildAreaPanels() {
       panel.appendChild(lbl);
     });
 
+    // Кнопка автомасштаба (заглушка)
+    const btnAuto = document.createElement('button');
+    btnAuto.textContent = '⇅';
+    btnAuto.title = 'Auto scale';
+    btnAuto.addEventListener('click', () => { area.autoScale(); graph.redraw(true); });
+    panel.appendChild(btnAuto);
+
     // Кнопка сброса
     const btnReset = document.createElement('button');
     btnReset.textContent = '⟲';
@@ -535,25 +513,74 @@ function buildAreaPanels() {
     btnReset.addEventListener('click', () => { area.resetView(graph.data); graph.redraw(true); });
     panel.appendChild(btnReset);
 
-    // Кнопка автомасштаба (заглушка)
-    const btnAuto = document.createElement('button');
-    btnAuto.textContent = '⟳';
-    btnAuto.title = 'Auto scale (soon)';
-    btnAuto.disabled = true;
-    panel.appendChild(btnAuto);
     areaPanels.appendChild(panel);
 
-
-    updateTraceType(panel, area);
+    updateTraceType(btnType, area);
+    updateSmithFormatButton(btnSmith, area);
     updateChannelCheckboxes(panel, area);
-    updateSmithFormatDropdown(panel, area);
   });
 }
 
-function updateTraceType(panel, area) {
-  type = panel.querySelector('.trace-type').textContent = '▾ ' + TRACE_TYPES[area.trace.type].name;
+// Trace type button and menu
+function updateTraceType(btn, area) {
+  btn.textContent = '▾ ' + TRACE_TYPES[area.trace.type].name;
 }
 
+function setTraceType(btn, area, type) {
+  area.setTraceType(type);
+  updateTraceType(btn, area);
+  const panel = btn.closest('.area-panel');
+  updateChannelCheckboxes(panel, area);
+  updateSmithFormatButton(panel.querySelector('.smith-format'), area);
+  graph.redraw(true);
+}
+
+function showTraceTypeDropdown(e, area) {
+  const m = prepareContextMenu(e), MAX_ROWS = 9;
+  if (!m) return;
+  const groups = {
+    'ALL': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_ALL),
+    'S11/S22': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
+    'S21/S12': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_THRU)
+  };
+  for (const [groupName, types] of Object.entries(groups)) {
+    for (let i = 0; i < types.length; i += MAX_ROWS) {
+      const chunk = types.slice(i, i + MAX_ROWS);
+      const col = addMenuColumn(m);
+      addMenuItem(col, i == 0 ? groupName : ' ', null, true);
+      chunk.forEach(typeKey => addMenuItem(col, TRACE_TYPES[typeKey].name, () => setTraceType(m.parent, area, typeKey)));
+    }
+  }
+  showContextMenu();
+}
+
+// Smith format button and menu
+function updateSmithFormatButton(btn, area) {
+  if (!area.rad) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  btn.textContent = '▾ ' + MARKER_INFO[area.trace.smithFormat].name;
+}
+
+function setSmithFormat(parent, area, format) {
+  area.setSmithFormat(format);
+  updateSmithFormatButton(parent, area);
+  graph.redraw(true);
+}
+
+function showSmithFormatDropdown(e, area) {
+  const m = prepareContextMenu(e);
+  if (!m) return;
+  const col = addMenuColumn(m);
+  for (const [format, info] of Object.entries(MARKER_INFO)) {
+    if (info.valid & area.trace.channels) {
+      const check = (format === area.trace.smithFormat) ? '✓ ' : '   ';
+      addMenuItem(col, `${check}${info.name}`, () => setSmithFormat(m.parent, area, format));
+    }
+  }
+  showContextMenu();
+}
+
+// Channel checkboxes
 function updateChannelCheckboxes(panel, area) {
   const typeDef = TRACE_TYPES[area.trace.type];
   const mask = area.trace.channels;
@@ -565,41 +592,9 @@ function updateChannelCheckboxes(panel, area) {
   });
 }
 
-function updateSmithFormatDropdown(panel, area) {
-  const select = panel.querySelector('.smith-select');
-  if (!select) return;
-  const typeDef = TRACE_TYPES[area.trace.type];
-  if (!typeDef || !typeDef.rad) { select.style.display = 'none'; return; }
-  select.style.display = 'block';
-  select.innerHTML = '';
-
-  const currentChannels = area.trace.channels;
-  let hasValidOption = false;
-  for (const [key, info] of Object.entries(MARKER_INFO)) {
-    if (info.valid & currentChannels) {
-      const opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = info.name;
-      if (key === area.trace.smithFormat) opt.selected = true;
-      select.appendChild(opt);
-      hasValidOption = true;
-    }
-  }
-
-  if (!hasValidOption || !select.value) {
-    const firstValid = Object.entries(MARKER_INFO).find(([k, info]) => info.valid & currentChannels);
-    if (firstValid) {
-      area.trace.smithFormat = firstValid[0];
-      updateSmithFormatDropdown(panel, area);
-    }
-  }
-}
-
-
 function showTDMenu(e, area) {
   const m = prepareContextMenu(e, true);
   if (!m) return;
-  const target = e.target;
   // === Колонка 1: Mode + Window ===
   const col1 = addMenuColumn(m);
   addMenuItem(col1, 'Mode:', null, true);
@@ -613,7 +608,7 @@ function showTDMenu(e, area) {
     addMenuItem(col1, `${check} ${name}`, () => {
       area.setTD({ mode: key });
       graph.redraw(true);
-      showTDMenu(e, area);
+      showTDMenu(null, area);
     });
   });
 
@@ -625,7 +620,7 @@ function showTDMenu(e, area) {
     addMenuItem(col1, `${check} ${displayName}`, () => {
       area.setTD({ window: win });
       graph.redraw(true);
-      showTDMenu(e, area);
+      showTDMenu(null, area);
     });
   });
   
@@ -635,9 +630,9 @@ function showTDMenu(e, area) {
   const enableCheck = area.td.enabled ? '✓' : '   ';
   addMenuItem(col2, `${enableCheck} Enable TDR`, () => {
     area.setTD({ enabled: !area.td.enabled });
-    target.classList.toggle('active', area.td.enabled);
+    m.parent.classList.toggle('active', area.td.enabled);
     graph.redraw(true);
-    showTDMenu(e, area);
+    showTDMenu(null, area);
   });
 
   addMenuItem(col2, 'X-Axis:', null, true);
@@ -651,7 +646,7 @@ function showTDMenu(e, area) {
     addMenuItem(col2, `${check} ${name}`, () => {
       area.setTD({ xAxisMode: key });
       graph.redraw(true);
-      showTDMenu(e, area);
+      showTDMenu(null, area);
     });
   });
 
@@ -675,7 +670,7 @@ function showTDMenu(e, area) {
     e.stopPropagation();
   });
 
-  showContextMenu(target);
+  showContextMenu();
 }
 
 // =============================
@@ -711,7 +706,7 @@ function showLayoutDropdown(e) {
     const displayName = `${layout.icon} ${check}${layout.name}`;
     addMenuItem(col, `${check} ${layout.name}`, () => {  changeLayout(id); });
   });
-  showContextMenu(e.target);
+  showContextMenu();
 }
 
 function changeLayout(layoutId) {
