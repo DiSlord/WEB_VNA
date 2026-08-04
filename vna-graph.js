@@ -123,11 +123,11 @@ autoScale() {
   if (!isFinite(minY)) minY = typeDef.bottom;
   const dy = maxY - minY;
   if (dy === 0) {maxY+=1; minY-=1;}
-  else {maxY+=dy*0.05; minY-=dy*0.05;}
-  const { ticks, step } = getNiceTicks(minY, maxY, MIN_GRID_SPACING_PY, height);
-  this.view.yMin = ticks[0] - step;
-  this.view.yMax = ticks[ticks.length - 1] + step;
+  else {maxY+=dy*0.1; minY-=dy*0.1;}
   if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
+  const { ticks } = getNiceTicks(minY, maxY, MIN_GRID_SPACING_PY, height);
+  this.view.yMin = ticks[0];
+  this.view.yMax = ticks[ticks.length - 1];
 }
 
 freqToTime(freq) {
