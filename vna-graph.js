@@ -116,7 +116,7 @@ autoScale() {
   for (const entry of this.cachedPoints) {
     if (!entry.points || entry.points.length === 0) continue;
     for (const p of entry.points) {
-      if (p.freq < xMin || p.freq > xMax) continue;
+      if (p.freq < xMin || p.freq > xMax || !isFinite(p.value)) continue;
       if (p.value < minY) minY = p.value;
       if (p.value > maxY) maxY = p.value;
     }
@@ -126,10 +126,12 @@ autoScale() {
   const dy = maxY - minY;
   if (dy === 0) {maxY+=1; minY-=1;}
   else {maxY+=dy*0.1; minY-=dy*0.1;}
-  if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
   const { ticks } = getNiceTicks(minY, maxY, MIN_GRID_SPACING_PY, height);
   this.view.yMin = ticks[0];
   this.view.yMax = ticks[ticks.length - 1];
+  if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
+  // В начале autoScale, после цикла:
+//console.log(` minY=${minY}, maxY=${maxY}, type=${this.trace.type}`);
 }
 
 freqToTime(freq) {
