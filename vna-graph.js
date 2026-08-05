@@ -2,7 +2,7 @@ const GRAPH_CONST = {
  AREA: { left: 55, right: 25, top: 32, bottom: 25 },
  MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
  MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3, DOT_LINE: 1,
- MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
+ MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 2, TRACE_STORED_LINE: 1,
  TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
  MARKER_DASH: [4, 4], CURSOR_DASH: [2, 2], GRID_DASH: [3, 3],
  ZOOM_FACTOR: 0.05,
@@ -54,7 +54,9 @@ updateBounds(totalWidth, totalHeight, dpr) {
    bottom: b,
    width: r - l,
    height: b - t,
+   padRight: padRight,
    padLeft: padLeft,
+   padTop: padTop,
    padBottom: padBottom,
    cx: Math.round((r + l) / 2 - 3) + 0.5,
    cy: Math.round((b + t) / 2 + 3) + 0.5,
@@ -294,14 +296,15 @@ clampPointToRect(p, rect) {
 }
 
 drawHeader(ctx, graph) {
-  const { left, top } = this.bounds;
+  const { left, top, padTop } = this.bounds;
   const { typeDef, channels, smithFormat } = this.trace;
   const channelNames = getChannelList(channels).join(', ');
   const suffix = this.rad ? MARKER_INFO[smithFormat].name : typeDef.suffix;
   const label = `[${channelNames}]  ${typeDef.name}${suffix ? ' (' + suffix + ')' : ''}`;
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.font = graph.getFont('axis');
-  ctx.fillText(label, left, top - 12*graph.dpr);
+  ctx.fillText(label, left, top - padTop + 8);
 }
 
 drawGrid(ctx, graph) {
@@ -323,16 +326,18 @@ drawGrid(ctx, graph) {
 
   ctx.font = graph.getFont('axis-label');
   ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   ctx.beginPath();
   const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? '%.3Fm' : '%.3Fs') : '%.3qHz';
   for (const tick of xTicks.ticks) {
     const x = left + (tick - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
-    ctx.fillText(formatValue(format, tick), x, bottom + 18);
+    ctx.fillText(formatValue(format, tick), x, bottom + 4);
   }
 
   const { typeDef } = this.trace;
   ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
   for (const value of yTicks.ticks) {
     const y = top + (yMax - value) / (yMax - yMin) * height;
     this.drawLine(ctx, left, y, right, y);
@@ -532,11 +537,12 @@ drawMarkers(ctx, graph) {
       ctx.fillStyle = isSelected ? activeColor : inactiveColor;
       ctx.lineWidth = isSelected ? 1 + DOT_LINE : DOT_LINE;
       ctx.beginPath();
-      ctx.arc(m.x, m.y, isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
+      ctx.arc(m.x, m.y, (isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS)*graph.dpr, 0, 2 * Math.PI); ctx.fill();
       ctx.stroke();
       const valText = rad ? formatSmithValue(smithFormat, m.freq, m.value) : formatValue(typeDef.f, m.value);
       const isNearRight = m.x + 70 > right;
       ctx.textAlign = isNearRight ? 'right' : 'left';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = markerLabel;
       ctx.font = graph.getFont(isSelected ? 'amarker' : 'marker');
       this.drawTextWithOutline(ctx, `M${m.idx + 1}: ${valText}`, m.x + (isNearRight ? -8 : 8), m.y + 4, markerLabel, markerOutline);
@@ -577,7 +583,7 @@ drawCursorInfo(ctx, graph) {
   const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? 'Distance: %.3Fm' : 'Time: %.3Fs') : 'Freq: %qHz';
 
   if (this.rad) {
-    const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedPoints);
+    const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS*graph.dpr, this.cachedPoints);
     if (!nearest) return;
     const { point, slot, channel } = nearest;
     const info = MARKER_INFO[smithFormat] || MARKER_INFO.RX;
@@ -606,7 +612,7 @@ drawCursorInfo(ctx, graph) {
     ctx.strokeStyle = graph.getCSSColor('--bg'); 
     ctx.lineWidth = DOT_LINE;
     ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel);
-    ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS*graph.dpr, 0, 2 * Math.PI); ctx.fill();
     ctx.stroke();
 
     const infoLines = [formatValue(format, this.getX(point.freq))];
@@ -629,7 +635,7 @@ drawCursorInfo(ctx, graph) {
       if (!interp) continue;
       if (interp.y <= bottom && interp.y >= top) {
         ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
-        ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS*graph.dpr, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
       }
       const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
       const valText = formatValue(typeDef.f, interp.value);
