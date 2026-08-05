@@ -237,15 +237,16 @@ findNearestInCache(x, y, maxRadius, cache) {
   return best;
 }
 
-getMouseArea(x, y, markers = []) {
+getMouseArea(graph, x, y, markers = []) {
   const { left, right, top, bottom, width, height, padLeft, padBottom } = this.bounds;
   const { xMin, xMax, yMin, yMax } = this.view;
+  const { MARKER_PICKUP_RADIUS } = GRAPH_CONST;
   const la = left - padLeft, ba = bottom + padBottom;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
   if (this.rad) {
     if (inH && inV && this.cachedMarkers.length > 0) {
-      const nearest = this.findNearestInCache(x, y, GRAPH_CONST.MARKER_PICKUP_RADIUS, this.cachedMarkers);
+      const nearest = this.findNearestInCache(x, y, MARKER_PICKUP_RADIUS*graph.dpr, this.cachedMarkers);
       if (nearest) return { zone: 'marker', index: nearest.point.idx, cursor: 'grabbing' };
       return { zone: 'plot', cursor: 'crosshair' };
     }
@@ -263,7 +264,7 @@ getMouseArea(x, y, markers = []) {
   }
   if (inH && inV) {
     for (const line of this.cachedMarkerLines)
-      if (Math.abs(x - line.x) < GRAPH_CONST.MARKER_PICKUP_RADIUS) return { zone: 'marker', index: line.id, cursor: 'grabbing' };
+      if (Math.abs(x - line.x) < MARKER_PICKUP_RADIUS*graph.dpr) return { zone: 'marker', index: line.id, cursor: 'grabbing' };
     return { zone: 'plot', cursor: 'crosshair' };
   }
   return null;
@@ -869,7 +870,7 @@ onMouseDown(e) {
   const { x, y } = this.getMouseCoords(e);
   this.mouse.handler = null;
   for (const area of this.areas) {
-    const info = area.getMouseArea(x, y, this.markers);
+    const info = area.getMouseArea(this, x, y, this.markers);
     if (info && this._tryRegisterDrag(area, info, x, y)) return;
   }
 }
@@ -882,7 +883,7 @@ onMouseMove(e) {
   if (x < 0 || x >= width || y < 0 || y >= height) return;
   let cursor = 'crosshair';
   for (const area of this.areas) {
-    const info = area.getMouseArea(x, y, this.markers);
+    const info = area.getMouseArea(this, x, y, this.markers);
     if (info) { cursor = info.cursor; break; }
   }
   this.redraw(false);
@@ -899,7 +900,7 @@ onWheel(e) {
   e.preventDefault();
   const { x, y } = this.getMouseCoords(e);
   for (const area of this.areas) {
-    const info = area.getMouseArea(x, y);
+    const info = area.getMouseArea(this, x, y);
     if (!info || info.zone === 'plot') continue;
     const range = info.zone === 'x' ? area.view.xMax - area.view.xMin : area.view.yMax - area.view.yMin;
     const delta = range * GRAPH_CONST.ZOOM_FACTOR;
