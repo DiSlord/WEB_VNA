@@ -302,9 +302,9 @@ drawHeader(ctx, graph) {
   const suffix = this.rad ? MARKER_INFO[smithFormat].name : typeDef.suffix;
   const label = `[${channelNames}]  ${typeDef.name}${suffix ? ' (' + suffix + ')' : ''}`;
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   ctx.font = graph.getFont('axis');
-  ctx.fillText(label, left, top - padTop + 8);
+  ctx.fillText(label, left, top - padTop/2);
 }
 
 drawGrid(ctx, graph) {
@@ -337,11 +337,11 @@ drawGrid(ctx, graph) {
 
   const { typeDef } = this.trace;
   ctx.textAlign = 'right';
-  ctx.textBaseline = 'alphabetic';
+  ctx.textBaseline = 'middle';
   for (const value of yTicks.ticks) {
     const y = top + (yMax - value) / (yMax - yMin) * height;
     this.drawLine(ctx, left, y, right, y);
-    ctx.fillText(formatValue(typeDef.f, value), left - 4, y + 4);
+    ctx.fillText(formatValue(typeDef.f, value), left - 4, y);
   }
   ctx.stroke();
   ctx.setLineDash([]);
@@ -413,8 +413,6 @@ drawComplexGrid(ctx, graph) {
   for (const val of params.gridRe) this.drawComplexLabel(ctx, val, params.reLabel(val));
   for (const val of params.gridIm) this.drawComplexLabel(ctx, val, params.imLabel(val));
   if (params.edgeLabels) for (const l of params.edgeLabels) this.drawComplexLabel(ctx, l.val, l);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
 }
 
 /**
@@ -540,12 +538,12 @@ drawMarkers(ctx, graph) {
       ctx.arc(m.x, m.y, (isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS)*graph.dpr, 0, 2 * Math.PI); ctx.fill();
       ctx.stroke();
       const valText = rad ? formatSmithValue(smithFormat, m.freq, m.value) : formatValue(typeDef.f, m.value);
-      const isNearRight = m.x + 70 > right;
-      ctx.textAlign = isNearRight ? 'right' : 'left';
-      ctx.textBaseline = 'alphabetic';
+      const isNearRight = (m.x + 80*graph.dpr > right ? -8 : 8)*graph.dpr;
+      ctx.textAlign = isNearRight < 0 ? 'right' : 'left';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = markerLabel;
       ctx.font = graph.getFont(isSelected ? 'amarker' : 'marker');
-      this.drawTextWithOutline(ctx, `M${m.idx + 1}: ${valText}`, m.x + (isNearRight ? -8 : 8), m.y + 4, markerLabel, markerOutline);
+      this.drawTextWithOutline(ctx, `M${m.idx + 1}: ${valText}`, m.x + isNearRight, m.y, markerLabel, markerOutline);
     }
   }
 }
@@ -571,7 +569,6 @@ drawTooltip(ctx, graph, x, y, infoLines) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   for (let i = 0; i < infoLines.length; i++)
     ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING*graph.dpr, panelY + TOOLTIP_PADDING*graph.dpr + i * TOOLTIP_LINE_HEIGHT*graph.dpr);
-  ctx.textBaseline = 'alphabetic';
 }
 
 drawCursorInfo(ctx, graph) {
