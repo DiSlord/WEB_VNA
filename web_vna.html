@@ -677,43 +677,51 @@ function showTDMenu(e, area) {
 // Select areas on canvas configuration
 // =============================
 const LAYOUT_PRESETS = [
-  { name: '1: ◻', regions: [[0, 0, 1, 1]] },
-  { name: '2: ◫', regions: [[0, 0, 0.5, 1], [0.5, 0, 1, 1]] },
-  { name: '2: ▤', regions: [[0, 0, 1, 0.5], [0, 0.5, 1, 1]] },
-  { name: '3: ◰', regions: [[0, 0, 0.5, 1], [0.5, 0, 1, 0.5], [0.5, 0.5, 1, 1]] },
-  { name: '3: ◳', regions: [[0, 0, 0.5, 0.5], [0, 0.5, 0.5, 1], [0.5, 0, 1, 1]] },
-  { name: '3: ▤', regions: [[0, 0, 1, 0.333], [0, 0.333, 1, 0.666], [0, 0.666, 1, 1]] },
-  { name: '4: ⊞', regions: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] }
+  { name: '1', r: [[0, 0, 1, 1]] },
+  { name: '2', r: [[0, 0, 0.5, 1], [0.5, 0, 1, 1]] },
+  { name: '2', r: [[0, 0, 1, 0.5], [0, 0.5, 1, 1]] },
+  { name: '3', r: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 1, 1]] },
+  { name: '3', r: [[0, 0, 0.5, 1], [0.5, 0, 1, 0.5], [0.5, 0.5, 1, 1]] },
+  { name: '3', r: [[0, 0, 0.5, 0.5], [0, 0.5, 0.5, 1], [0.5, 0, 1, 1]] },
+  { name: '3', r: [[0, 0, 1, 0.333], [0, 0.333, 1, 0.666], [0, 0.666, 1, 1]] },
+  { name: '4', r: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] },
+  { name: '4', r: [[0, 0, 0.333, 0.5], [0.333, 0, 0.666, 0.5], [0.666, 0, 1, 0.5], [0, 0.5, 1, 1]] }
 ];
 
-function getRegions(id) {
-  const preset = LAYOUT_PRESETS[id];
-  if (!preset) return [];
-  return preset.regions.map(r => ({ leftPct: r[0], topPct: r[1], rightPct: r[2], bottomPct: r[3] }));
+// Generate icons depend from regions
+LAYOUT_PRESETS.forEach(p => { p.icon = generateLayoutIcon(p.r); });
+function generateLayoutIcon(r, size = 12, gap = 1.5, padding = 0) {
+  const inner = size - 2 * padding;
+  const rects = r.map(([l, t, r, b]) => {
+    const x = padding + l * inner + gap / 2, y = padding + t * inner + gap / 2;
+    const w = (r - l) * inner - gap, h = (b - t) * inner - gap;
+    return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" fill="currentColor">${rects}</svg>`;
 }
 
 function updateLayoutButtonText(id) {
   btnLayout.layoutId = id;
-  btnLayout.innerHTML = `${LAYOUT_PRESETS[id].name} ▾`;
+  const l = LAYOUT_PRESETS[id];
+  btnLayout.innerHTML = `${l.r.length}: ${l.icon} ▾`;
 }
 
 function showLayoutDropdown(e) {
   const m = prepareContextMenu(e);
   if (!m) return;
   const col = addMenuColumn(m);
-  LAYOUT_PRESETS.forEach((layout, id) => {
+  LAYOUT_PRESETS.forEach((l, id) => {
     const check = id == btnLayout.layoutId ? '✓' : '   ';
-    const displayName = `${layout.icon} ${check}${layout.name}`;
-    addMenuItem(col, `${check} ${layout.name}`, () => {  changeLayout(id); });
+    addMenuItem(col, `${check} ${l.r.length}: ${l.icon}`, () => { changeLayout(id); });
   });
   showContextMenu();
 }
 
 function changeLayout(layoutId) {
-  const regionsArray = getRegions(layoutId);
-  if (!regionsArray) return;
+  const r = LAYOUT_PRESETS[layoutId]?.r;
+  if (!r) return;
   localStorage.setItem('vna-layout', layoutId);
-  graph.setRegions(regionsArray);
+  graph.setRegions(r.map(([l, t, ri, b]) => ({ leftPct: l, topPct: t, rightPct: ri, bottomPct: b })));
   buildAreaPanels();
   updateLayoutButtonText(layoutId);
 }

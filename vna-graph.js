@@ -31,7 +31,6 @@ constructor(region) {
   // Time Domain settings
   this.td = {
     enabled: false,
-    dirty: true,
     mode: 'bandpass',        // 'bandpass' | 'lowpass_step' | 'lowpass_impulse'
     window: 'minimum',       // 'minimum' | 'normal' | 'maximum'
     velocityFactor: 0.66,
@@ -40,7 +39,7 @@ constructor(region) {
   this.tdCache = [];         // Кэш IFFT-результата (пока пустой)
 }
 
-updateBounds(totalWidth, totalHeight) {
+updateBounds(totalWidth, totalHeight, dpr) {
   const { left: padLeft, right: padRight, top: padTop, bottom: padBottom } = GRAPH_CONST.AREA;
   const regionLeft = Math.round(totalWidth * this.region.leftPct);
   const regionRight = Math.round(totalWidth * this.region.rightPct);
@@ -55,10 +54,14 @@ updateBounds(totalWidth, totalHeight) {
    bottom: b,
    width: r - l,
    height: b - t,
+   padLeft: padLeft,
+   padBottom: padBottom,
    cx: Math.round((r + l) / 2 - 3) + 0.5,
    cy: Math.round((b + t) / 2 + 3) + 0.5,
    R:  Math.min(r - l - 10, b - t - 6) / 2,
   };
+  for (const key in this.bounds) this.bounds[key] *= dpr;
+
   this.visible = this.region.rightPct > 0;
 }
 
@@ -97,12 +100,8 @@ setChannels(channelsObj) {
 // Метод для установки TD-параметров с пометкой dirty при изменении
 setTD(settings) {
   if (!settings) return;
-  for (const key of ['enabled', 'mode', 'window', 'velocityFactor', 'xAxisMode']) {
-    if (settings[key] !== undefined && this.td[key] !== settings[key]) {
-      this.td[key] = settings[key];
-      this.td.dirty = true;
-    }
-  }
+  for (const key of ['enabled', 'mode', 'window', 'velocityFactor', 'xAxisMode'])
+    if (settings[key] !== undefined && this.td[key] !== settings[key]) this.td[key] = settings[key];
 }
 
 autoScale() {
@@ -114,7 +113,6 @@ autoScale() {
   let minY = Infinity;
   let maxY = -Infinity;
   for (const entry of this.cachedPoints) {
-    if (!entry.points || entry.points.length === 0) continue;
     for (const p of entry.points) {
       if (p.freq < xMin || p.freq > xMax || !isFinite(p.value)) continue;
       if (p.value < minY) minY = p.value;
@@ -130,8 +128,6 @@ autoScale() {
   this.view.yMin = ticks[0];
   this.view.yMax = ticks[ticks.length - 1];
   if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
-  // В начале autoScale, после цикла:
-//console.log(` minY=${minY}, maxY=${maxY}, type=${this.trace.type}`);
 }
 
 freqToTime(freq) {
@@ -188,7 +184,7 @@ calculateCache(data, graph) {
           if (!s) continue;
           const value = typeDef.calc(s, i, freq, slotData.values, slotData.freqs);
           const x = left + (freq - xMin) / (xMax - xMin) * width;
-          const y = top + (yMax - value) / (yMax - yMin) * height;
+          const y = isFinite(value) ? top + (yMax - value) / (yMax - yMin) * height : value < 0 ?  1e12 : -1e12;
           points.push({ x, y, freq, value });
         }
       }
@@ -240,9 +236,9 @@ findNearestInCache(x, y, maxRadius, cache) {
 }
 
 getMouseArea(x, y, markers = []) {
-  const { left, right, top, bottom, width, height } = this.bounds;
+  const { left, right, top, bottom, width, height, padLeft, padBottom } = this.bounds;
   const { xMin, xMax, yMin, yMax } = this.view;
-  const la = left - GRAPH_CONST.AREA.left, ba = bottom + GRAPH_CONST.AREA.bottom;
+  const la = left - padLeft, ba = bottom + padBottom;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
   if (this.rad) {
@@ -305,7 +301,7 @@ drawHeader(ctx, graph) {
   const label = `[${channelNames}]  ${typeDef.name}${suffix ? ' (' + suffix + ')' : ''}`;
   ctx.textAlign = 'left';
   ctx.font = graph.getFont('axis');
-  ctx.fillText(label, left, top - 12);
+  ctx.fillText(label, left, top - 12*graph.dpr);
 }
 
 drawGrid(ctx, graph) {
@@ -318,8 +314,8 @@ drawGrid(ctx, graph) {
   ctx.strokeRect(left, top, width, height);
   xMin = this.getX(xMin);
   xMax = this.getX(xMax);
-  const xTicks = getNiceTicks(xMin, xMax, MIN_GRID_SPACING_PX, width);
-  const yTicks = getNiceTicks(yMin, yMax, MIN_GRID_SPACING_PY, height);
+  const xTicks = getNiceTicks(xMin, xMax, MIN_GRID_SPACING_PX*graph.dpr, width);
+  const yTicks = getNiceTicks(yMin, yMax, MIN_GRID_SPACING_PY*graph.dpr, height);
 
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
   ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = GRID_LINE;
@@ -551,24 +547,24 @@ drawMarkers(ctx, graph) {
 drawTooltip(ctx, graph, x, y, infoLines) {
   const { right, bottom, top } = this.bounds;
   const { TOOLTIP_WIDTH, TOOLTIP_LINE_HEIGHT, TOOLTIP_PADDING, TOOLTIP_OFFSET } = GRAPH_CONST;
-  const panelHeight = 2 * TOOLTIP_PADDING + infoLines.length * TOOLTIP_LINE_HEIGHT;
+  const panelHeight = 2 * TOOLTIP_PADDING*graph.dpr + infoLines.length * TOOLTIP_LINE_HEIGHT*graph.dpr;
 
-  let panelX = x + TOOLTIP_OFFSET;
+  let panelX = x + TOOLTIP_OFFSET*graph.dpr;
   let panelY = y - panelHeight / 2;
-  if (panelX + TOOLTIP_WIDTH > right) panelX = x - TOOLTIP_WIDTH - TOOLTIP_OFFSET;
+  if (panelX + TOOLTIP_WIDTH*graph.dpr > right) panelX = x - TOOLTIP_WIDTH*graph.dpr - TOOLTIP_OFFSET*graph.dpr;
   if (panelY < top) panelY = top;
   if (panelY + panelHeight > bottom) panelY = bottom - panelHeight;
 
   ctx.fillStyle = graph.getCSSColor('--tooltip-bg');
   ctx.strokeStyle = graph.getCSSColor('--tooltip-border');
   ctx.lineWidth = 1;
-  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
-  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
+  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH*graph.dpr, panelHeight);
+  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH*graph.dpr, panelHeight);
   ctx.fillStyle = graph.getCSSColor('--tooltip-text');
   ctx.font = graph.getFont('tooltip');
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   for (let i = 0; i < infoLines.length; i++)
-    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING, panelY + TOOLTIP_PADDING + i * TOOLTIP_LINE_HEIGHT);
+    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING*graph.dpr, panelY + TOOLTIP_PADDING*graph.dpr + i * TOOLTIP_LINE_HEIGHT*graph.dpr);
   ctx.textBaseline = 'alphabetic';
 }
 
@@ -666,6 +662,7 @@ constructor(canvasId, data) {
   this.mouse = { x: 0, y: 0, handler: null, handlerData: null };
   this.colors = {};
   this.updateColors();
+  this.fontCache = new Map();
   this._themeObserver = new MutationObserver(() => this.updateColors());
   this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
   this.setupEventHandlers();
@@ -701,9 +698,18 @@ updateColors() {
   for (let slot = 0; slot < 5; slot++)
     for (const ch of ['S11', 'S21', 'S12', 'S22'])
       this.colors[`--trace-m${slot}-${ch}`] = style.getPropertyValue(`--trace-m${slot}-${ch.toLowerCase()}`).trim() || '#888888';
+  if (this.fontCache) this.fontCache.clear();
 }
 
-getFont(type) { return getComputedStyle(document.documentElement).getPropertyValue(`--font-${type}`).trim() || "400 12px/1.2 'Arial', sans-serif"; }
+getFont(type) {
+  const d = this.dpr || 1;
+  const key = `${type}_${d}`;
+  if (this.fontCache.has(key)) return this.fontCache.get(key);
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(`--font-${type}`).trim() || "400 12px/1.2 'Arial', sans-serif";
+  const scaled = raw.replace(/(\d+(?:\.\d+)?)px/g, (match, size) => `${Math.round(parseFloat(size) * d)}px`);
+  this.fontCache.set(key, scaled);
+  return scaled;
+}
 getCSSColor(varName, fallback) { return this.colors[varName] ?? fallback ?? CSS_COLORS[varName] ?? '#888888'; }
 getTraceColor(slot, channel) { return this.getCSSColor(`--trace-${slot}-${channel}`, '#888888'); }
 
@@ -742,14 +748,16 @@ resetView() { for (const area of this.areas) area.resetView(this.data); this.red
 resize() {
   const { width, height } = this.canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  this.canvas.width = Math.round(width * dpr); this.canvas.height = Math.round(height * dpr);
-  this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  for (const area of this.areas) area.updateBounds(width, height);
+  this.dpr = dpr;
+  this.width = width * dpr;
+  this.height = height * dpr;
+  this.canvas.width = Math.round(this.width); this.canvas.height = Math.round(this.height);
+  for (const area of this.areas) area.updateBounds(width, height, dpr);
   this.redraw(true);
 }
 
 redraw(dirty = false) {
-  const { width, height } = this.canvas.getBoundingClientRect();
+  const { width, height } = this;
   this.ctx.fillStyle = this.getCSSColor('--bg');
   this.ctx.fillRect(0, 0, width, height);
   for (const area of this.areas) {
@@ -852,7 +860,7 @@ _axisDragHandler(action, area, x, y) {
 }
 
 // Mouse and touch handlers
-getMouseCoords(e) { const rect = this.canvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; }
+getMouseCoords(e) { const rect = this.canvas.getBoundingClientRect(); return { x: (e.clientX - rect.left)*this.dpr, y: (e.clientY - rect.top)*this.dpr }; }
 onMouseUp() { if (this.mouse.handler) { this.mouse.handler('release', this.mouse.x, this.mouse.y); this.mouse.handler = null; } }
 onMouseDown(e) {
   const { x, y } = this.getMouseCoords(e);
@@ -867,7 +875,7 @@ onMouseMove(e) {
   const { x, y } = this.getMouseCoords(e);
   this.mouse.x = x; this.mouse.y = y;
   if (this.mouse.handler) { this.mouse.handler('drag', x, y); return; }
-  const { width, height } = this.canvas.getBoundingClientRect();
+  const { width, height } = this;
   if (x < 0 || x >= width || y < 0 || y >= height) return;
   let cursor = 'crosshair';
   for (const area of this.areas) {
