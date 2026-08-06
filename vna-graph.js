@@ -1,14 +1,19 @@
+// Config fixed values
 const GRAPH_CONST = {
- AREA: { left: 55, right: 25, top: 32, bottom: 25 },
- MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
- MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 4, CURSOR_DOT_RADIUS: 3, DOT_LINE: 1,
- MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1,
- TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
+ MARKER_LINE: 1, GRID_LINE: 1, CURSOR_LINE: 1, TRACE_LIVE_LINE: 1, TRACE_STORED_LINE: 1, DOT_LINE: 1,
  MARKER_DASH: [4, 4], CURSOR_DASH: [2, 2], GRID_DASH: [3, 3],
  ZOOM_FACTOR: 0.05,
+};
+// Config scaled, depend from display DPR
+const GRAPH_SCALED = {
+ AREA_LEFT: 55, AREA_RIGHT: 25, AREA_TOP: 32, AREA_BOTTOM: 25,
+ MIN_GRID_SPACING_PX: 60, MIN_GRID_SPACING_PY: 40,
+ MARKER_DOT_RADIUS: 3, MARKER_SEL_DOT_RADIUS: 3.5, CURSOR_DOT_RADIUS: 3,
+ MARKER_TEXT: 90,
+ TOOLTIP_WIDTH: 220, TOOLTIP_PADDING: 7, TOOLTIP_LINE_HEIGHT: 15, TOOLTIP_OFFSET: 15,
  MARKER_PICKUP_RADIUS: 16
 };
-
+// Colors from CSS or default
 const CSS_COLORS = {
   '--bg': '#0a0a0f', '--plot-grid': '#444444', '--plot-border': '#666666',
   '--plot-axis-text': '#aaaaaa', '--marker-active': '#ff3333', '--marker-inactive': '#666666',
@@ -17,7 +22,6 @@ const CSS_COLORS = {
   '--overlay-bg': 'rgba(255,100,100,0.2)', '--overlay-text': '#ffffff'
 };
 const CSS_COLOR_VARS = Object.keys(CSS_COLORS);
-
 
 // Area class, render data in selected area dependfrom rypa and scale
 class Area {
@@ -28,25 +32,23 @@ constructor(region) {
   this.cachedPoints = [];
   this.cachedMarkers = [];
   this.cachedMarkerLines = [];
-  // Time Domain settings
-  this.td = {
+  this.td = {                // Time Domain settings
     enabled: false,
     mode: 'bandpass',        // 'bandpass' | 'lowpass_step' | 'lowpass_impulse'
     window: 'minimum',       // 'minimum' | 'normal' | 'maximum'
     velocityFactor: 0.66,
     xAxisMode: 'time'        // 'time' | 'distance'
   };
-  this.tdCache = [];         // Кэш IFFT-результата (пока пустой)
 }
 
-updateBounds(totalWidth, totalHeight, dpr) {
-  const { left: padLeft, right: padRight, top: padTop, bottom: padBottom } = GRAPH_CONST.AREA;
-  const regionLeft = Math.round(totalWidth * this.region.leftPct);
-  const regionRight = Math.round(totalWidth * this.region.rightPct);
-  const regionTop = Math.round(totalHeight * this.region.topPct);
-  const regionBottom = Math.round(totalHeight * this.region.bottomPct);
-  const fixRight = (this.region.rightPct < 1) ? 0 : padRight; // Fix area at right
-  const l = regionLeft + padLeft, r = regionRight - fixRight, t = regionTop + padTop, b = regionBottom - padBottom;
+updateBounds(graph) {
+  const { AREA_LEFT, AREA_RIGHT, AREA_TOP, AREA_BOTTOM, MIN_GRID_SPACING_PX, MIN_GRID_SPACING_PY } = graph.config;
+  const regionLeft = Math.round(graph.width * this.region.leftPct);
+  const regionRight = Math.round(graph.width * this.region.rightPct);
+  const regionTop = Math.round(graph.height * this.region.topPct);
+  const regionBottom = Math.round(graph.height * this.region.bottomPct);
+  const fixRight = (this.region.rightPct < 1) ? 0 : AREA_RIGHT; // Fix area at right
+  const l = regionLeft + AREA_LEFT, r = regionRight - fixRight, t = regionTop + AREA_TOP, b = regionBottom - AREA_BOTTOM;
   this.bounds = {
    left: l,
    right: r,
@@ -54,16 +56,16 @@ updateBounds(totalWidth, totalHeight, dpr) {
    bottom: b,
    width: r - l,
    height: b - t,
-   padRight: padRight,
-   padLeft: padLeft,
-   padTop: padTop,
-   padBottom: padBottom,
+   a_left: regionLeft,
+   a_right: regionRight,
+   a_top: regionTop,
+   a_bottom: regionBottom,
    cx: Math.round((r + l) / 2 - 3) + 0.5,
    cy: Math.round((b + t) / 2 + 3) + 0.5,
    R:  Math.min(r - l - 10, b - t - 6) / 2,
+   min_grid_x: MIN_GRID_SPACING_PX,
+   min_grid_y: MIN_GRID_SPACING_PY,
   };
-  for (const key in this.bounds) this.bounds[key] *= dpr;
-
   this.visible = this.region.rightPct > 0;
 }
 
@@ -108,10 +110,10 @@ setTD(settings) {
 
 autoScale() {
   if (!this.cachedPoints || this.cachedPoints.length === 0 || this.rad) return;
-  const { height } = this.bounds;
+  const { height, min_grid_y } = this.bounds;
   const { typeDef } = this.trace;
   const { xMin, xMax } = this.view;
-  const { MIN_GRID_SPACING_PY } = GRAPH_CONST;
+
   let minY = Infinity;
   let maxY = -Infinity;
   for (const entry of this.cachedPoints) {
@@ -126,7 +128,7 @@ autoScale() {
   const dy = maxY - minY;
   if (dy === 0) {maxY+=1; minY-=1;}
   else {maxY+=dy*0.1; minY-=dy*0.1;}
-  const { ticks } = getNiceTicks(minY, maxY, MIN_GRID_SPACING_PY, height);
+  const { ticks } = getNiceTicks(minY, maxY, min_grid_y, height);
   this.view.yMin = ticks[0];
   this.view.yMax = ticks[ticks.length - 1];
   if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
@@ -238,33 +240,32 @@ findNearestInCache(x, y, maxRadius, cache) {
 }
 
 getMouseArea(graph, x, y, markers = []) {
-  const { left, right, top, bottom, width, height, padLeft, padBottom } = this.bounds;
+  const { left, right, top, bottom, width, height, a_left, a_bottom } = this.bounds;
   const { xMin, xMax, yMin, yMax } = this.view;
-  const { MARKER_PICKUP_RADIUS } = GRAPH_CONST;
-  const la = left - padLeft, ba = bottom + padBottom;
+  const { MARKER_PICKUP_RADIUS } = graph.config;
   const inV = y >= top && y <= bottom;
   const inH = x >= left && x <= right;
   if (this.rad) {
     if (inH && inV && this.cachedMarkers.length > 0) {
-      const nearest = this.findNearestInCache(x, y, MARKER_PICKUP_RADIUS*graph.dpr, this.cachedMarkers);
+      const nearest = this.findNearestInCache(x, y, MARKER_PICKUP_RADIUS, this.cachedMarkers);
       if (nearest) return { zone: 'marker', index: nearest.point.idx, cursor: 'grabbing' };
       return { zone: 'plot', cursor: 'crosshair' };
     }
     return null;
   }
-  if (x < left && x > la && inV) {
+  if (x < left && x > a_left && inV) {
     const rel = 3 * (y - top) / height;
     const min = rel > 1, max = rel < 2;
     return { zone: 'y', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ns-resize' };
   }
-  if (y > bottom && y < ba && inH) {
+  if (y > bottom && y < a_bottom && inH) {
     const rel = 3 * (x - left) / width;
     const min = rel < 2, max = rel > 1;
     return { zone: 'x', min: min, max: max, cursor: (min && max) ? 'grabbing' : 'ew-resize' };
   }
   if (inH && inV) {
     for (const line of this.cachedMarkerLines)
-      if (Math.abs(x - line.x) < MARKER_PICKUP_RADIUS*graph.dpr) return { zone: 'marker', index: line.id, cursor: 'grabbing' };
+      if (Math.abs(x - line.x) < MARKER_PICKUP_RADIUS) return { zone: 'marker', index: line.id, cursor: 'grabbing' };
     return { zone: 'plot', cursor: 'crosshair' };
   }
   return null;
@@ -297,7 +298,7 @@ clampPointToRect(p, rect) {
 }
 
 drawHeader(ctx, graph) {
-  const { left, top, padTop } = this.bounds;
+  const { left, top, a_top } = this.bounds;
   const { typeDef, channels, smithFormat } = this.trace;
   const channelNames = getChannelList(channels).join(', ');
   const suffix = this.rad ? MARKER_INFO[smithFormat].name : typeDef.suffix;
@@ -305,21 +306,21 @@ drawHeader(ctx, graph) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.font = graph.getFont('axis');
-  ctx.fillText(label, left, top - padTop/2);
+  ctx.fillText(label, left, (top + a_top)/2);
 }
 
 drawGrid(ctx, graph) {
-  const { left, right, top, bottom, width, height } = this.bounds;
+  const { left, right, top, bottom, width, height, min_grid_x, min_grid_y } = this.bounds;
   let { xMin, xMax, yMin, yMax } = this.view;
-  const { MIN_GRID_SPACING_PX, MIN_GRID_SPACING_PY, MARKER_DASH, MARKER_LINE, GRID_LINE, GRID_DASH } = GRAPH_CONST;
+  const { MARKER_DASH, MARKER_LINE, GRID_LINE, GRID_DASH } = graph.config;
 
   ctx.strokeStyle = graph.getCSSColor('--plot-border');
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, width, height);
   xMin = this.getX(xMin);
   xMax = this.getX(xMax);
-  const xTicks = getNiceTicks(xMin, xMax, MIN_GRID_SPACING_PX*graph.dpr, width);
-  const yTicks = getNiceTicks(yMin, yMax, MIN_GRID_SPACING_PY*graph.dpr, height);
+  const xTicks = getNiceTicks(xMin, xMax, min_grid_x, width);
+  const yTicks = getNiceTicks(yMin, yMax, min_grid_y, height);
 
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
   ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = GRID_LINE;
@@ -374,7 +375,7 @@ drawComplexLabel(ctx, val, pos) {
 }
 
 drawComplexGrid(ctx, graph) {
-  const { MARKER_DASH, MARKER_LINE, GRID_LINE } = GRAPH_CONST;
+  const { MARKER_DASH, MARKER_LINE, GRID_LINE } = graph.config;
   const { cx, cy, R } = this.bounds;
   const info = MARKER_INFO[this.trace.smithFormat] || MARKER_INFO.RX;
   const params = info.params;
@@ -485,7 +486,7 @@ clipLineToRect(p1, p2, rect) {
 }
 
 drawTraces(ctx, graph) {
-  const { TRACE_LIVE_LINE, TRACE_STORED_LINE } = GRAPH_CONST;
+  const { TRACE_LIVE_LINE, TRACE_STORED_LINE } = graph.config;
   const { bounds } = this;
   ctx.save();
   ctx.beginPath(); ctx.rect(bounds.left, bounds.top, bounds.width, bounds.height); ctx.clip();
@@ -527,19 +528,20 @@ drawMarkers(ctx, graph) {
   const inactiveColor = graph.getCSSColor('--marker-inactive');
   const markerLabel = graph.getCSSColor('--marker-label');
   const markerOutline = graph.getCSSColor('--bg');
-  const { MARKER_DOT_RADIUS, MARKER_SEL_DOT_RADIUS, DOT_LINE } = GRAPH_CONST;
+  const { MARKER_DOT_RADIUS, MARKER_SEL_DOT_RADIUS, DOT_LINE, MARKER_TEXT } = graph.config;
 
   for (const marker of this.cachedMarkers) {
     for (const m of marker.points) {
       const isSelected = m.idx === graph.selectedMarkerIndex;
       ctx.strokeStyle = markerLabel;
       ctx.fillStyle = isSelected ? activeColor : inactiveColor;
-      ctx.lineWidth = isSelected ? 1 + DOT_LINE : DOT_LINE;
+      ctx.lineWidth = DOT_LINE;
       ctx.beginPath();
-      ctx.arc(m.x, m.y, (isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS)*graph.dpr, 0, 2 * Math.PI); ctx.fill();
+      ctx.arc(m.x, m.y, (isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS), 0, 2 * Math.PI); ctx.fill();
       ctx.stroke();
       const valText = rad ? formatSmithValue(smithFormat, m.freq, m.value) : formatValue(typeDef.f, m.value);
-      const isNearRight = (m.x + 80*graph.dpr > right ? -8 : 8)*graph.dpr;
+      const offset = 2*MARKER_SEL_DOT_RADIUS;
+      const isNearRight = m.x + MARKER_TEXT > right ? -offset : offset;
       ctx.textAlign = isNearRight < 0 ? 'right' : 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = markerLabel;
@@ -551,37 +553,37 @@ drawMarkers(ctx, graph) {
 
 drawTooltip(ctx, graph, x, y, infoLines) {
   const { right, bottom, top } = this.bounds;
-  const { TOOLTIP_WIDTH, TOOLTIP_LINE_HEIGHT, TOOLTIP_PADDING, TOOLTIP_OFFSET } = GRAPH_CONST;
-  const panelHeight = 2 * TOOLTIP_PADDING*graph.dpr + infoLines.length * TOOLTIP_LINE_HEIGHT*graph.dpr;
+  const { TOOLTIP_WIDTH, TOOLTIP_LINE_HEIGHT, TOOLTIP_PADDING, TOOLTIP_OFFSET } = graph.config;
+  const panelHeight = 2 * TOOLTIP_PADDING + infoLines.length * TOOLTIP_LINE_HEIGHT;
 
-  let panelX = x + TOOLTIP_OFFSET*graph.dpr;
+  let panelX = x + TOOLTIP_OFFSET;
   let panelY = y - panelHeight / 2;
-  if (panelX + TOOLTIP_WIDTH*graph.dpr > right) panelX = x - TOOLTIP_WIDTH*graph.dpr - TOOLTIP_OFFSET*graph.dpr;
+  if (panelX + TOOLTIP_WIDTH > right) panelX = x - TOOLTIP_WIDTH - TOOLTIP_OFFSET;
   if (panelY < top) panelY = top;
   if (panelY + panelHeight > bottom) panelY = bottom - panelHeight;
 
   ctx.fillStyle = graph.getCSSColor('--tooltip-bg');
   ctx.strokeStyle = graph.getCSSColor('--tooltip-border');
   ctx.lineWidth = 1;
-  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH*graph.dpr, panelHeight);
-  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH*graph.dpr, panelHeight);
+  ctx.fillRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
+  ctx.strokeRect(panelX, panelY, TOOLTIP_WIDTH, panelHeight);
   ctx.fillStyle = graph.getCSSColor('--tooltip-text');
   ctx.font = graph.getFont('tooltip');
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   for (let i = 0; i < infoLines.length; i++)
-    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING*graph.dpr, panelY + TOOLTIP_PADDING*graph.dpr + i * TOOLTIP_LINE_HEIGHT*graph.dpr);
+    ctx.fillText(infoLines[i], panelX + TOOLTIP_PADDING, panelY + TOOLTIP_PADDING + i * TOOLTIP_LINE_HEIGHT);
 }
 
 drawCursorInfo(ctx, graph) {
   const { mouse } = graph;
   const { left, top, right, bottom, width, height, cx, cy, R } = this.bounds;
   const { typeDef, smithFormat } = this.trace;
-  const { MARKER_PICKUP_RADIUS, CURSOR_DASH, CURSOR_DOT_RADIUS, DOT_LINE, CURSOR_LINE} = GRAPH_CONST;
+  const { MARKER_PICKUP_RADIUS, CURSOR_DASH, CURSOR_DOT_RADIUS, DOT_LINE, CURSOR_LINE} = graph.config;
   if (mouse.x < left || mouse.x > right || mouse.y > bottom || mouse.y < top) return;
   const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? 'Distance: %.3Fm' : 'Time: %.3Fs') : 'Freq: %qHz';
 
   if (this.rad) {
-    const nearest = this.findNearestInCache(mouse.x, mouse.y, GRAPH_CONST.MARKER_PICKUP_RADIUS*graph.dpr, this.cachedPoints);
+    const nearest = this.findNearestInCache(mouse.x, mouse.y, MARKER_PICKUP_RADIUS, this.cachedPoints);
     if (!nearest) return;
     const { point, slot, channel } = nearest;
     const info = MARKER_INFO[smithFormat] || MARKER_INFO.RX;
@@ -610,7 +612,7 @@ drawCursorInfo(ctx, graph) {
     ctx.strokeStyle = graph.getCSSColor('--bg'); 
     ctx.lineWidth = DOT_LINE;
     ctx.fillStyle = graph.getTraceColor(`m${slot}`, channel);
-    ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS*graph.dpr, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
     ctx.stroke();
 
     const infoLines = [formatValue(format, this.getX(point.freq))];
@@ -633,7 +635,7 @@ drawCursorInfo(ctx, graph) {
       if (!interp) continue;
       if (interp.y <= bottom && interp.y >= top) {
         ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
-        ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS*graph.dpr, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
       }
       const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
       const valText = formatValue(typeDef.f, interp.value);
@@ -667,6 +669,7 @@ constructor(canvasId, data) {
   this.colors = {};
   this.updateColors();
   this.fontCache = new Map();
+  this.config = {...GRAPH_CONST, ...GRAPH_SCALED};
   this._themeObserver = new MutationObserver(() => this.updateColors());
   this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
   this.setupEventHandlers();
@@ -753,10 +756,12 @@ resize() {
   const { width, height } = this.canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   this.dpr = dpr;
-  this.width = width * dpr;
-  this.height = height * dpr;
-  this.canvas.width = Math.round(this.width); this.canvas.height = Math.round(this.height);
-  for (const area of this.areas) area.updateBounds(width, height, dpr);
+  this.width  = this.canvas.width  = Math.round(width  * dpr);
+  this.height = this.canvas.height = Math.round(height * dpr);
+  this.config = {...GRAPH_SCALED};
+  for (const key in this.config) this.config[key] *= dpr;
+  this.config = {...this.config, ...GRAPH_CONST};
+  for (const area of this.areas) area.updateBounds(this);
   this.redraw(true);
 }
 
@@ -903,7 +908,7 @@ onWheel(e) {
     const info = area.getMouseArea(this, x, y);
     if (!info || info.zone === 'plot') continue;
     const range = info.zone === 'x' ? area.view.xMax - area.view.xMin : area.view.yMax - area.view.yMin;
-    const delta = range * GRAPH_CONST.ZOOM_FACTOR;
+    const delta = range * this.config.ZOOM_FACTOR;
     this.applyAxisDelta(area, info, e.deltaY > 0 ? delta : -delta);
   }
 }

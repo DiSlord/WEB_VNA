@@ -10,12 +10,12 @@ constructor(slotsCount = 5) {
   this.td_slots = [];
   for (let i = 0; i < slotsCount; i++) {
     this.slots.push({ uid: 0, frequencies: [], S11: [], S21: [], S12: [], S22: [] });
-    this.td_slots.push({ uid: 0, td_key: 0, _M: 0, _df: 0, frequencies: [], S11: [], S21: [], S12: [], S22: [] });
+    this.td_slots.push({ uid: 0, cache: []});
   }
 }
 
-static tdKey(td) {
-  const s = `${td.mode}|${td.window}|${td.velocityFactor}`;
+static tdKey(td, ch) {
+  const s = `${td.mode}|${td.window}|${ch}`;
   let h = 0;
   for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
   return h;
@@ -56,24 +56,18 @@ getSlot(slot, channel, td = null) {
   const data = s && s[channel];
   if (!data || data.length === 0) return { freqs: [], values: [] };
   if (data[0].phase === undefined) VNA_MATH.addPolarData(data); // Add polar data fields
-
   if (!td || !td.enabled) return { freqs: s.frequencies, values: data || [] };
-  const tdCache = this.td_slots[slot];
-  const currentKey = VNAData.tdKey(td);
-  if (tdCache.uid !== s.uid || tdCache.td_key !== currentKey || tdCache[channel].length == 0) {
-    const result = VNA_MATH.performTD(s.frequencies, data, td);
-    tdCache.uid = s.uid;
-    tdCache.td_key = currentKey;
-    tdCache._M = result._M;
-    tdCache._df = result._df;
-    tdCache.frequencies = result.frequencies; // Виртуальные частоты длиной M
-    tdCache[channel] = result.values;
-  }
-  td._M = tdCache._M;
-  td._df = tdCache._df;
-  td._f0 = tdCache.frequencies[0];
-  td._f1 = tdCache.frequencies[tdCache.frequencies.length - 1];
-  return { freqs: tdCache.frequencies, values: tdCache[channel] || []  };
+  const key = VNAData.tdKey(td, channel);
+  const td_slot = this.td_slots[slot];
+  if (td_slot.uid !== s.uid) {td_slot.uid = s.uid; td_slot.cache = [];} // reset cache on new uid
+  // Check cached data, if no add it
+  if (!td_slot.cache[key]) td_slot.cache[key] = VNA_MATH.performTD(s.frequencies, data, td);
+  const c = td_slot.cache[key];
+  td._M = c._M;
+  td._df = c._df;
+  td._f0 = c.frequencies[0];
+  td._f1 = c.frequencies[c.frequencies.length - 1];
+  return { freqs: c.frequencies, values: c.values || []  };
 }
 
 hasData(slot) {
