@@ -171,6 +171,7 @@ calculateCache(data, graph) {
   this.cachedPoints = [];
   const channels = getChannelList(this.trace.channels);
   if (!typeDef || !typeDef.calc) return;
+  this.td._M = null; // Hack
   for (let slot = 0; slot < graph.visibility.length; slot++) {
     if (!graph.visibility[slot]) continue;
     for (const channel of channels) {

@@ -63,10 +63,16 @@ getSlot(slot, channel, td = null) {
   // Check cached data, if no add it
   if (!td_slot.cache[key]) td_slot.cache[key] = VNA_MATH.performTD(s.frequencies, data, td);
   const c = td_slot.cache[key];
-  td._M = c._M;
-  td._df = c._df;
-  td._f0 = c.frequencies[0];
-  td._f1 = c.frequencies[c.frequencies.length - 1];
+  if (td._M === null) { // !!! HACK !!! convert to virtual freq range !!!!
+    td._M = c._M;
+    td._df = c._df;
+    td._f0 = c.frequencies[0];
+    td._f1 = c.frequencies[c.frequencies.length - 1];
+  } else {
+    const k = (td._M * td._df) / ((td._M - 1) * c._M * c._df);
+    const df = td._f1 - td._f0;
+    for (let n = 0; n < c._M; n++) c.frequencies[n] = td._f0 + n * k * df;
+  }
   return { freqs: c.frequencies, values: c.values || []  };
 }
 
