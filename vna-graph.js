@@ -69,7 +69,10 @@ updateBounds(graph) {
   this.visible = this.region.rightPct > 0;
 }
 
-setRange(start, stop) { this.view.xMin = start; this.view.xMax = stop; }
+setRange(start, stop) {
+ this.view.xMin = start; this.view.xMax = stop;
+ this.td._M = null; // Hack 
+}
 
 setTraceType(type) {
   const typeDef = TRACE_TYPES[type];
@@ -171,7 +174,7 @@ calculateCache(data, graph) {
   this.cachedPoints = [];
   const channels = getChannelList(this.trace.channels);
   if (!typeDef || !typeDef.calc) return;
-  this.td._M = null; // Hack
+  
   for (let slot = 0; slot < graph.visibility.length; slot++) {
     if (!graph.visibility[slot]) continue;
     for (const channel of channels) {

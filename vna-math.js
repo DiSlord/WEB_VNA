@@ -749,14 +749,12 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   }
 
   // ---- 6. Формирование результата ----
-  const frequencies = new Array(FFT_SIZE);
   const times = new Array(FFT_SIZE);
   const values = new Array(FFT_SIZE);
-  const dt = 1 / (td._M * td._df);
+
   for (let n = 0; n < FFT_SIZE; n++) {
     values[n] = { re: buf[2 * n], im: buf[2 * n + 1] };
-    frequencies[n] = (freqs[N - 1] - freqs[0]) * n / (FFT_SIZE - 1);
-    times[n] = n * dt;
+    times[n] = n / (FFT_SIZE * df);
   }
-  return { frequencies, values, _M: FFT_SIZE, _df: df };
+  return { times, values, _M: FFT_SIZE, _df: df };
 };
