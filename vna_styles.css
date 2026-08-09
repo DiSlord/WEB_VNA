@@ -232,9 +232,8 @@ canvas {
  color: var(--btn-text);
  background: var(--na_button);
  border: 1px solid var(--border);
- border-radius: 5px;
+ border-radius: 4px;
  cursor: pointer;
- transition: all 0.2s;
  justify-content: center;
  gap: 3px;
 }
@@ -291,16 +290,16 @@ canvas {
  background: var(--na_button);
  z-index: 2;
  border: 1px solid var(--border);
- padding: 4px 8px;
+ padding: 4px;
 }
 
 .table td {
  border: 1px solid var(--border);
- text-align: left;
+ text-align: center;
  white-space: nowrap;
  overflow: hidden;
  text-overflow: ellipsis;
- padding: 4px 8px;
+ padding: 4px;
 }
 
 .table tbody tr {

@@ -29,19 +29,18 @@
   <div class="bar-column">
    <label>Markers</label>
    <div class="bar-row">
-    <button class="btn-main" onclick="addMarker()">
-     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-    </button>
-    <button class="btn-main" onclick="changeMarker()" id="btnEdit">
+    <button class="btn-main" onclick="addMarker('freq')" title="Add frequency marker">+ ƒ</button>
+    <button class="btn-main" onclick="addMarker('time')" title="Add time marker">+ 🕐</button>
+    <button class="btn-main" onclick="changeMarker()" title="Edit active marker">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
     </button>
-    <button class="btn-main" onclick="removeMarker()" id="btnDelete">
+    <button class="btn-main" onclick="removeMarker()" title="Delete active marker">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
     </button>
    </div>
    <div class="table-wrapper">
     <table class="table">
-      <thead><tr><th style="width: 40px;">№</th><th>Frequency</th></tr></thead>
+      <thead><tr><th style="width: 42px;">№</th><th style="width: 22px;"> </th><th>Value</th></tr></thead>
       <tbody id="markerTable"></tbody>
     </table>
    </div>
@@ -416,20 +415,21 @@ async function copyToClipboard() {
 // =============================
 // Markers
 // =============================
-function addMarker() { graph.addMarker(); }
+function addMarker(type) { graph.addMarker(type); }
 function removeMarker() { graph.removeSelectedMarker(); }
 function changeMarker() {
   const idx = graph.selectedMarkerIndex;
   if (idx < 0 || idx >= graph.markers.length) return;
-  const tdFreq = markerTable.querySelectorAll('tr')[idx].cells[1];
+  const tdFreq = markerTable.querySelectorAll('tr')[idx].cells[2];
   if (!tdFreq || tdFreq.querySelector('form')) return;
   const currentValue = tdFreq.textContent;
   tdFreq.innerHTML = `<form><input type="text" value="${currentValue}"></form>`;
   const form = tdFreq.querySelector('form');
   const input = form.querySelector('input');
   input.focus();
-  input.setSelectionRange(0, currentValue.lastIndexOf(' '));
-  form.addEventListener('submit', (e) => {e.preventDefault(); graph.setMarkerFreq(idx, getValue(input.value)); });
+  const match = currentValue.match(/(.*\d)/);
+  input.setSelectionRange(0, match ? match[1].length : currentValue.length);
+  form.addEventListener('submit', (e) => {e.preventDefault(); graph.setMarkerXVal(idx, getValue(input.value)); });
   input.addEventListener('blur', () => { tdFreq.textContent = currentValue; });
 }
 
@@ -438,7 +438,9 @@ function updateMarkerTable() {
   graph.markers.forEach((marker, idx) => {
     const tr = document.createElement('tr');
     if (idx === graph.selectedMarkerIndex) tr.classList.add('selected');
-    tr.innerHTML = `<td style="width: 40px;">${idx + 1}</td><td>${formatFreqValue(marker.freq)}</td>`;
+    const icon = marker.type === 'freq' ? 'ƒ' : '🕐';
+    const valText = marker.type === 'freq' ? formatFreqValue(marker.xVal) : formatTime(marker.xVal, 6);
+    tr.innerHTML = `<td>M${idx + 1}</td><td>${icon}</td><td style="text-align: right">${valText}</td>`;
     tr.addEventListener('click', () => { graph.selectMarker(idx); });
     tr.addEventListener('dblclick', (e) => { changeMarker(idx); });
     markerTable.appendChild(tr);
@@ -498,7 +500,7 @@ function buildAreaPanels() {
       panel.appendChild(lbl);
     });
 
-    // Кнопка автомасштаба (заглушка)
+    // Кнопка автомасштаба
     const btnAuto = document.createElement('button');
     btnAuto.textContent = '⇅';
     btnAuto.title = 'Auto scale';
@@ -651,15 +653,12 @@ function showTDMenu(e, area) {
 
   addMenuItem(col2, ' ', null, true);
   // Velocity Factor — input
-  const html = `Velocity:  <input type="text" class="velocity" value="${area.td.velocityFactor}">`;
+  const html = `Velocity:  <input type="text" class="velocity" value="${graph.velocityFactor}">`;
   const vfInput = addMenuItem(col2, html, null).querySelector('input');
 
   vfInput.addEventListener('change', () => {
-    const v = parseFloat(vfInput.value.replace(',', '.'));
-    if (v > 0 && v <= 1) {
-      area.setTD({ velocityFactor: v });
-      graph.redraw(true);
-    } else vfInput.value = area.td.velocityFactor;
+    graph.setVelocityFactor(parseFloat(vfInput.value.replace(',', '.')));
+    vfInput.value = graph.velocityFactor;
   });
   vfInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {

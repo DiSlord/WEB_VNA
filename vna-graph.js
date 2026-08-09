@@ -28,7 +28,9 @@ class Area {
 constructor(region) {
   this.region = region;
   this.trace = { type: 'LOGMAG', typeDef: null, channels: CH_PORT1, smithFormat: 'RX' };
-  this.view = { xMin: 1e6, xMax: 100e6, yMin: -60, yMax: 0 };
+  this.view = null;
+  this.resetView();
+
   this.cachedPoints = [];
   this.cachedMarkers = [];
   this.cachedMarkerLines = [];
@@ -36,8 +38,7 @@ constructor(region) {
     enabled: false,
     mode: 'bandpass',        // 'bandpass' | 'lowpass_step' | 'lowpass_impulse'
     window: 'minimum',       // 'minimum' | 'normal' | 'maximum'
-    velocityFactor: 0.66,
-    xAxisMode: 'time'        // 'time' | 'distance'
+    xAxisMode: 'time',       // 'time' | 'distance'
   };
 }
 
@@ -69,9 +70,9 @@ updateBounds(graph) {
   this.visible = this.region.rightPct > 0;
 }
 
-setRange(start, stop) {
- this.view.xMin = start; this.view.xMax = stop;
- this.td._M = null; // Hack 
+setRange(start, stop) { 
+  this.viewFreq.xMin = start; this.viewFreq.xMax = stop;
+  this.viewTime.xMin = null; this.viewTime.xMax = null;
 }
 
 setTraceType(type) {
@@ -80,7 +81,8 @@ setTraceType(type) {
   const valid = this.trace.channels & typeDef.valid;
   const channels = valid !== 0 ? valid : (typeDef.valid & -typeDef.valid);
   this.trace = {...this.trace, type: type, typeDef: typeDef, channels: channels};
-  this.view = {...this.view, yMin: typeDef.bottom, yMax: typeDef.top, yLimit: typeDef.min };
+  this.viewFreq = {...this.viewFreq, yMin: typeDef.bottom, yMax: typeDef.top, yLimit: typeDef.min };
+  this.viewTime = {...this.viewTime, yMin: typeDef.bottom, yMax: typeDef.top, yLimit: typeDef.min };
   this.rad = typeDef.rad || 0;
   // Reset Smith format
   if (!this.rad) return;
@@ -107,7 +109,7 @@ setChannels(channelsObj) {
 // Метод для установки TD-параметров с пометкой dirty при изменении
 setTD(settings) {
   if (!settings) return;
-  for (const key of ['enabled', 'mode', 'window', 'velocityFactor', 'xAxisMode'])
+  for (const key of ['enabled', 'mode', 'window', 'xAxisMode'])
     if (settings[key] !== undefined && this.td[key] !== settings[key]) this.td[key] = settings[key];
 }
 
@@ -121,9 +123,9 @@ autoScale() {
   let maxY = -Infinity;
   for (const entry of this.cachedPoints) {
     for (const p of entry.points) {
-      if (p.freq < xMin || p.freq > xMax || !isFinite(p.value)) continue;
-      if (p.value < minY) minY = p.value;
-      if (p.value > maxY) maxY = p.value;
+      if (p.xVal < xMin || p.xVal > xMax || !isFinite(p.yVal)) continue;
+      if (p.yVal < minY) minY = p.yVal;
+      if (p.yVal > maxY) maxY = p.yVal;
     }
   }
   if (!isFinite(maxY)) maxY = typeDef.top;
@@ -137,63 +139,92 @@ autoScale() {
   if ( typeDef.min !== null && this.view.yMin < typeDef.min) this.view.yMin = typeDef.min;
 }
 
-freqToTime(freq) {
-  if (!this.td._M || !this.td._df) return 0;
-  const maxTime = (this.td._M - 1) / (this.td._M * this.td._df);
-  const f0 = this.td._f0, f1 = this.td._f1;
-  if (f1 === f0) return 0;
-  return ((freq - f0) / (f1 - f0)) * maxTime;
+timeToDistance(time, graph) {
+  return time * 299792458 * graph.velocityFactor / 2;
 }
 
-freqToDistance(freq) {
-  return this.freqToTime(freq) * 299792458 * this.td.velocityFactor / 2;
-}
-
-getX(freq) {
+getX(freq, graph) {
   if (!this.td.enabled) return freq;
-  return this.td.xAxisMode === 'distance' ? this.freqToDistance(freq) : this.freqToTime(freq);
+  return this.td.xAxisMode === 'distance' ? this.freqToDistance(freq, graph) : this.freqToTime(freq);
 }
 
-// Форматтер для вывода текста
-getXLabel(freq) {
-  if (!this.td.enabled) return formatFreqValue(freq);
-  return _formatPFloat(this.getX(freq), 3) + (this.td.xAxisMode === 'distance' ? 'm' : 's');
+resetView() {
+  this.viewFreq = { xMin: null, xMax: null, yMin:null, yMax: null};
+  this.viewTime = { xMin: null, xMax: null, yMin:null, yMax: null};
 }
 
-resetView(data) {
-  const { typeDef } = this.trace;
-  const f = data.getSlot(0, 'S11').freqs;
-  if (f && f.length > 0) this.setRange(f[0], f[f.length - 1]);
-  if (typeDef) { this.view.yMin = typeDef.bottom; this.view.yMax = typeDef.top; }
+interpolatePoint(points, targetX) {
+  const n = points.length;
+  if (!points || points.length === 0 || targetX > points[n - 1].xVal || targetX < points[0].xVal ) return null;
+  if (n === 1) return { ...points[0] };
+  // 1. Быстрая оценка индекса (предполагаем равномерную сетку)
+  const span = points[n - 1].xVal - points[0].xVal;
+  let idx = Math.floor(((targetX - points[0].xVal) / span) * (n - 1));
+  idx = Math.max(0, Math.min(idx, n - 2)); // гарантируем, что idx и idx+1 существуют
+  let pL = points[idx], pR = points[idx + 1];
+  // 2. Проверка, попали ли в интервал
+  if (targetX < pL.xVal || targetX > pR.xVal) {
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (points[mid].xVal <= targetX) lo = mid;
+      else hi = mid - 1;
+    }
+    pL = points[lo];
+    pR = points[lo + 1];
+  }
+  if (pL.xVal === targetX) return { ...pL };
+  const deltaX = pR.xVal - pL.xVal;
+  const t = (targetX - pL.xVal) / deltaX; 
+  const interpYVal = (typeof pL.yVal === 'object' && pL.yVal !== null)
+    ? { re: pL.yVal.re + t * (pR.yVal.re - pL.yVal.re), im: pL.yVal.im + t * (pR.yVal.im - pL.yVal.im) }
+    : pL.yVal + t * (pR.yVal - pL.yVal);
+  return {...pL, xVal: targetX, yVal: interpYVal, x: pL.x + t * (pR.x - pL.x), y: pL.y + t * (pR.y - pL.y) };
+}
+
+initViewFromSlotData(xData, typeDef) {
+  if (!xData || xData.length === 0) return null;
+  return {
+    xMin: xData[0],
+    xMax: xData[xData.length - 1],
+    yMin: typeDef.bottom,
+    yMax: typeDef.top,
+    yLimit: typeDef.min
+  };
 }
 
 calculateCache(data, graph) {
   const { left, right, top, bottom, width, height, cx, cy, R } = this.bounds;
-  const { xMin, xMax, yMin, yMax } = this.view;
   const { typeDef } = this.trace;
   this.cachedPoints = [];
   const channels = getChannelList(this.trace.channels);
   if (!typeDef || !typeDef.calc) return;
-  
+
+  this.view = this.td.enabled ? this.viewTime : this.viewFreq;
+
   for (let slot = 0; slot < graph.visibility.length; slot++) {
     if (!graph.visibility[slot]) continue;
     for (const channel of channels) {
       const slotData = data.getSlot(slot, channel, this.td);
       if (!slotData) continue;
+      const xData = slotData.times || slotData.freqs;
       const points = [];
+      if (this.view.xMin === null || this.view.yMin === null) Object.assign(this.view, this.initViewFromSlotData(xData, typeDef));
+      if (!this.view) continue;
+      const { xMin, xMax, yMin, yMax } = this.view;
       if (this.rad) {
-        for (let i = 0; i < slotData.freqs.length; i++) {
-          const freq = slotData.freqs[i], s = slotData.values[i];
-          if (s) points.push({x: cx + s.re * R, y: cy - s.im * R, freq, value: s });
+        for (let i = 0; i < xData.length; i++) {
+          const xVal = xData[i], s = slotData.values[i];
+          if (s) points.push({ x: cx + s.re * R, y: cy - s.im * R, xVal, yVal: s });
         }
       } else {
-        for (let i = 0; i < slotData.freqs.length; i++) {
-          const freq = slotData.freqs[i], s = slotData.values[i];
+        for (let i = 0; i < xData.length; i++) {
+          const xVal = xData[i], s = slotData.values[i];
           if (!s) continue;
-          const value = typeDef.calc(s, i, freq, slotData.values, slotData.freqs);
-          const x = left + (freq - xMin) / (xMax - xMin) * width;
-          const y = isFinite(value) ? top + (yMax - value) / (yMax - yMin) * height : value < 0 ?  1e12 : -1e12;
-          points.push({ x, y, freq, value });
+          const yVal = typeDef.calc(s, i, slotData.freqs, slotData.values);
+          const x = left + (xVal - xMin) / (xMax - xMin) * width;
+          const y = isFinite(yVal) ? top + (yMax - yVal) / (yMax - yMin) * height : yVal < 0 ? 1e12 : -1e12;
+          points.push({ x, y, xVal, yVal });
         }
       }
       this.cachedPoints.push({ slot, channel, points });
@@ -207,21 +238,26 @@ updateMarkerPoints(markers) {
   this.cachedMarkers = [];
   this.cachedMarkerLines = [];
   if (!markers || markers.length === 0) return;
+  const areaType = this.td.enabled ? 'time' : 'freq';
   for (const entry of this.cachedPoints) {
     const mPoints = [];
     for (let m = 0; m < markers.length; m++) {
-      const interp = interpolatePoint(entry.points, markers[m].freq);
+      const marker = markers[m];
+      if (marker.type !== areaType) continue;
+      const interp = this.interpolatePoint(entry.points, marker.xVal);
       if (!interp) continue;
       const p = this.clampPointToRect(interp, this.bounds);
       if (interp.x >= left && interp.x <= right)
-        mPoints.push({ x: interp.x, y: p.y, freq: interp.freq, value: interp.value, idx: m });
+        mPoints.push({ x: interp.x, y: p.y, xVal: interp.xVal, yVal: interp.yVal, idx: m });
     }
-    if (mPoints.length > 0) { this.cachedMarkers.push({ slot: entry.slot, channel: entry.channel, points: mPoints }); }
+    if (mPoints.length > 0) this.cachedMarkers.push({ slot: entry.slot, channel: entry.channel, points: mPoints }); 
   }
   if (!this.rad) {
     const { xMin, xMax } = this.view;
     for (let m = 0; m < markers.length; m++) {
-      const x = left + (markers[m].freq - xMin) / (xMax - xMin) * width;
+      const marker = markers[m];
+      if (marker.type !== areaType) continue;
+      const x = left + (marker.xVal - xMin) / (xMax - xMin) * width;
       if (x >= left && x <= right) this.cachedMarkerLines.push({ id: m, x });
     }
   }
@@ -321,8 +357,7 @@ drawGrid(ctx, graph) {
   ctx.strokeStyle = graph.getCSSColor('--plot-border');
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, width, height);
-  xMin = this.getX(xMin);
-  xMax = this.getX(xMax);
+  if (this.td.enabled && this.td.xAxisMode === 'distance') { xMin = this.timeToDistance(xMin, graph); xMax = this.timeToDistance(xMax, graph); }
   const xTicks = getNiceTicks(xMin, xMax, min_grid_x, width);
   const yTicks = getNiceTicks(yMin, yMax, min_grid_y, height);
 
@@ -406,8 +441,8 @@ drawComplexGrid(ctx, graph) {
       ctx.beginPath();
       ctx.strokeStyle = (m.idx === graph.selectedMarkerIndex) ? activeColor : inactiveColor;
       ctx.lineWidth = MARKER_LINE;
-      this.drawComplexShape(ctx, params.reCircle(info.calcRe(m.value)));
-      this.drawComplexShape(ctx, params.imCircle(info.calcIm(m.value)));
+      this.drawComplexShape(ctx, params.reCircle(info.calcRe(m.yVal)));
+      this.drawComplexShape(ctx, params.imCircle(info.calcIm(m.yVal)));
       ctx.stroke();
     }
   }
@@ -527,7 +562,6 @@ drawMarkers(ctx, graph) {
   const { bounds, rad, trace, view } = this;
   const { left, right, top, bottom } = bounds;
   const { typeDef, smithFormat } = trace;
-  const { xMin, xMax } = view;
   const activeColor = graph.getCSSColor('--marker-active');
   const inactiveColor = graph.getCSSColor('--marker-inactive');
   const markerLabel = graph.getCSSColor('--marker-label');
@@ -543,8 +577,8 @@ drawMarkers(ctx, graph) {
       ctx.beginPath();
       ctx.arc(m.x, m.y, (isSelected ? MARKER_SEL_DOT_RADIUS : MARKER_DOT_RADIUS), 0, 2 * Math.PI); ctx.fill();
       ctx.stroke();
-      const valText = rad ? formatSmithValue(smithFormat, m.freq, m.value) : formatValue(typeDef.f, m.value);
-      const offset = 2*MARKER_SEL_DOT_RADIUS;
+      const valText = rad ? formatSmithValue(smithFormat, m.xVal, m.yVal) : formatValue(typeDef.f, m.yVal);
+      const offset = 2 * MARKER_SEL_DOT_RADIUS;
       const isNearRight = m.x + MARKER_TEXT > right ? -offset : offset;
       ctx.textAlign = isNearRight < 0 ? 'right' : 'left';
       ctx.textBaseline = 'middle';
@@ -600,9 +634,9 @@ drawCursorInfo(ctx, graph) {
       ctx.lineWidth = CURSOR_LINE;
       ctx.setLineDash(CURSOR_DASH);
       ctx.beginPath();
-      const re = info.calcRe(point.value), im = info.calcIm(point.value);
-      this.drawComplexShape(ctx, params.reCircle(info.calcRe(point.value)));
-      this.drawComplexShape(ctx, params.imCircle(info.calcIm(point.value)));
+      const re = info.calcRe(point.yVal), im = info.calcIm(point.yVal);
+      this.drawComplexShape(ctx, params.reCircle(info.calcRe(point.yVal)));
+      this.drawComplexShape(ctx, params.imCircle(info.calcIm(point.yVal)));
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
@@ -619,30 +653,30 @@ drawCursorInfo(ctx, graph) {
     ctx.beginPath(); ctx.arc(point.x, point.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill();
     ctx.stroke();
 
-    const infoLines = [formatValue(format, this.getX(point.freq))];
+    const infoLines = [formatValue(format, point.xVal)];
     const slotName = slot === 0 ? channel : `M${slot} ${channel}`;
-    const valText = formatSmithValue(smithFormat, point.freq, point.value);
+    const valText = formatSmithValue(smithFormat, point.xVal, point.yVal);
     infoLines.push(`${slotName}: ${valText}`);
     this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
   } else {
-    const { view } = this;
-    const cursorFreq = view.xMin + (mouse.x - left) / width * (view.xMax - view.xMin);
+    const {xMin, xMax} = this.view;
+    const cursorXVal = xMin + (mouse.x - left) / width * (xMax - xMin);
     ctx.strokeStyle = graph.getCSSColor('--cursor-line'); ctx.lineWidth = CURSOR_LINE;
     ctx.setLineDash(CURSOR_DASH);
     ctx.beginPath(); this.drawLine(ctx, mouse.x, top, mouse.x, bottom); ctx.stroke();
     ctx.setLineDash([]);
 
     ctx.strokeStyle = graph.getCSSColor('--bg'); ctx.lineWidth = DOT_LINE;
-    const infoLines = [formatValue(format, this.getX(cursorFreq))];
+    const infoLines = [formatValue(format, (this.td.enabled && this.td.xAxisMode === 'distance') ? this.timeToDistance(cursorXVal, graph) : cursorXVal)];
     for (const entry of this.cachedPoints) {
-      const interp = interpolatePoint(entry.points, cursorFreq);
+      const interp = this.interpolatePoint(entry.points, cursorXVal);
       if (!interp) continue;
       if (interp.y <= bottom && interp.y >= top) {
         ctx.fillStyle = graph.getTraceColor(`m${entry.slot}`, entry.channel);
         ctx.beginPath(); ctx.arc(mouse.x, interp.y, CURSOR_DOT_RADIUS, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
       }
       const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
-      const valText = formatValue(typeDef.f, interp.value);
+      const valText = formatValue(typeDef.f, interp.yVal);
       infoLines.push(`${slotName}: ${valText}`);
     }
     this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
@@ -669,6 +703,8 @@ constructor(canvasId, data) {
 
   this.visibility = [true, false, false, false, false];
   this.markers = []; this.selectedMarkerIndex = -1;
+  this.velocityFactor = 0.66;   // один на все Area
+
   this.mouse = { x: 0, y: 0, handler: null, handlerData: null };
   this.colors = {};
   this.updateColors();
@@ -742,6 +778,13 @@ clearSlot(slot) {
   this.redraw(true);
 }
 
+setVelocityFactor(vf) {
+  if (isNaN(vf) || vf <= 0.01 || vf > 1.0) return;
+  if (this.velocityFactor === vf) return;
+  this.velocityFactor = vf;
+  this.redraw(true);
+}
+
 setRange(start, stop) {
   for (const area of this.areas) area.setRange(start, stop);
   this.redraw(true);
@@ -754,7 +797,7 @@ resetToRange(slot) {
   this.setRange(f[0], f[f.length - 1]);
 }
 
-resetView() { for (const area of this.areas) area.resetView(this.data); this.redraw(true); }
+resetView() { for (const area of this.areas) area.resetView(); this.redraw(true); }
 
 resize() {
   const { width, height } = this.canvas.getBoundingClientRect();
@@ -786,19 +829,22 @@ updateMarkers() {
   this.redraw();
 }
 
-addMarker() {
-  const area = this.areas[0];
+addMarker(type = 'freq') {
+  const targetTdState = (type === 'time');
+  const area = this.areas.find(a => a.visible && a.td.enabled === targetTdState);
   if (!area) return;
   const { xMin, xMax } = area.view;
-  let freq = xMin + (xMax - xMin) * (this.markers.length + 1) / 10;
-  if (freq > xMax) freq = xMax;
-  this.markers.push({ freq: Math.round(freq) });
+  let xVal = xMin + (xMax - xMin) * (this.markers.length + 1) / 10;
+  if (xVal > xMax) xVal = xMax;
+  if (type === 'freq') xVal = Math.round(xVal);
+  this.markers.push({ type: type, xVal: xVal });
   this.selectMarker(this.markers.length - 1);
 }
 
-setMarkerFreq(idx, freq) {
-  if (idx < 0 || idx >= this.markers.length || isNaN(freq) || freq < 0) return;
-  this.markers[idx].freq = Math.round(freq);
+setMarkerXVal(idx, xVal) {
+  if (idx < 0 || idx >= this.markers.length || isNaN(xVal) || xVal < 0) return;
+  if (this.markers[idx].type === 'freq') xVal = Math.round(xVal);
+  this.markers[idx].xVal = xVal;
   this.updateMarkers();
 }
 
@@ -835,12 +881,12 @@ _markerDragHandler(action, area, x, y) {
   if (action === 'drag') {
     if (area.rad) {
       const nearest = area.findNearestInCache(x, y, Infinity, area.cachedPoints);
-      if (nearest) this.setMarkerFreq(this.mouse.handlerData.index, nearest.point.freq);
+      if (nearest) this.setMarkerXVal(this.mouse.handlerData.index, nearest.point.xVal);
     } else {
       const { bounds, view } = area;
-      let freq = view.xMin + (x - bounds.left) / bounds.width * (view.xMax - view.xMin);
-      if (freq < view.xMin) freq = view.xMin; if (freq > view.xMax) freq = view.xMax;
-      this.setMarkerFreq(this.mouse.handlerData.index, freq);
+      let xVal = view.xMin + (x - bounds.left) / bounds.width * (view.xMax - view.xMin);
+      if (xVal < view.xMin) xVal = view.xMin; if (xVal > view.xMax) xVal = view.xMax;
+      this.setMarkerXVal(this.mouse.handlerData.index, xVal);
     }
   }
   return true;

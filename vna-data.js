@@ -61,31 +61,11 @@ getSlot(slot, channel, td = null) {
   const td_slot = this.td_slots[slot];
   if (td_slot.uid !== s.uid) {td_slot.uid = s.uid; td_slot.cache = [];} // reset cache on new uid
   // Check cached data, if no add it
-  if (!td_slot.cache[key]) {
-    const result = VNA_MATH.performTD(s.frequencies, data, td);
-    td_slot.cache[key] = {
-      values: result.values,
-      _M: result._M,
-      _df: result._df,
-      f0: s.frequencies[0],      // Исходные границы частот
-      f1: s.frequencies[s.frequencies.length - 1],
-      freqs: new Array(result._M)
-    };
-  }
+  if (!td_slot.cache[key])
+    td_slot.cache[key] = VNA_MATH.performTD(s.frequencies, data, td);
+
   const c = td_slot.cache[key];
-  if (td._M === null) {
-    td._M = c._M;
-    td._df = c._df;
-    td._f0 = c.f0;
-    td._f1 = c.f1;
-    const step = (c.f1 - c.f0) / (c._M - 1);
-    for (let n = 0; n < c._M; n++) c.freqs[n] = c.f0 + n * step;
-  } else {
-    const k = (td._M * td._df) / ((td._M - 1) * c._M * c._df);
-    const df = td._f1 - td._f0;
-    for (let n = 0; n < c._M; n++) c.freqs[n] = td._f0 + n * k * df;
-  }
-  return { freqs: c.freqs, values: c.values || []  };
+  return { times: c.times, freqs: c.freqs, values: c.values || []  };
 }
 
 hasData(slot) {

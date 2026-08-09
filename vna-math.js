@@ -102,10 +102,10 @@ const VNA_MATH = {
  },
 
  // S21 SHUNT R = 0.5*Z0 * Re(1 - S21) / |1 - S21|² - 0.5 * Z0
- s21shunt_r: (s) => VNA_MATH._s21_r(1 + s.re, -s.im, VNA_MATH.Z0 / 2),
+ s21shunt_r: (s) => VNA_MATH._s21_r(1 - s.re, -s.im, VNA_MATH.Z0 / 2),
 
  // S21 SHUNT X = -0.5*Z0 * Im(1 - S21) / |1 - S21|²
- s21shunt_x: (s) => VNA_MATH._s21_x(1 + s.re, -s.im, VNA_MATH.Z0 / 2),
+ s21shunt_x: (s) => VNA_MATH._s21_x(1 - s.re, -s.im, VNA_MATH.Z0 / 2),
 
  // S21 SHUNT |Z| = 0.5*Z0 * sqrt(|S21|² / |1 - S21|²)
  s21shunt_z: (s) => {
@@ -182,77 +182,6 @@ const VNA_MATH = {
   return { re: a * Math.cos(p), im: a * Math.sin(p) };
  },
 };
-
-/**
- * Универсальный бинарный поиск диапазона для интерполяции.
- * Работает за O(log N).
- * 
- * @param {Array} points - Отсортированный массив объектов
- * @param {number} target - Искомое значение
- * @param {string} key - Ключ для сравнения (по умолчанию 'freq')
- * @returns {Object|null} { left: индекс_большего, right: индекс_меньшего } 
- *                        или { left: idx, right: idx } при точном совпадении.
- *                        Возвращает null, если массив пуст.
- */
-function findInterpolationRange(points, target, key = 'freq') {
-  if (!points || points.length === 0) return null;
-  const firstVal = points[0][key];
-  const lastVal = points[points.length - 1][key];
-  if (target <= firstVal) return { left: 0, right: 0 };
-  if (target >= lastVal) return { left: points.length - 1, right: points.length - 1 };
-  let left = 0;
-  let right = points.length - 1;
-  while (left <= right) {
-    const mid = (left + right) >> 1; // Быстрое деление на 2
-    const midVal = points[mid][key];
-    if (midVal === target) return { left: mid, right: mid };
-    if (midVal < target) left = mid + 1;
-    else right = mid - 1;
-  }
-  return { left, right };
-}
-
-/**
- * Универсальная функция линейной интерполяции точки по частоте.
- * Использует гибридный подход: быстрая математическая оценка для линейных данных,
- * fallback на бинарный поиск для нелинейных/неравномерных данных.
- */
-function interpolatePoint(points, targetFreq) {
-  if (!points || points.length === 0) return null;
-  if (points.length === 1) return Math.abs(points[0].freq - targetFreq) < 1 ? { ...points[0] } : null;
-
-  const firstFreq = points[0].freq;
-  const lastFreq = points[points.length - 1].freq;
-
-  if (targetFreq <= firstFreq) return Math.abs(firstFreq - targetFreq) < 1 ? { ...points[0] } : null;
-  if (targetFreq >= lastFreq) return Math.abs(lastFreq - targetFreq) < 1 ? { ...points[points.length - 1] } : null;
-
-  const span = lastFreq - firstFreq;
-  const idx = Math.max(0, Math.min(Math.floor(((targetFreq - firstFreq) / span) * (points.length - 1)), points.length - 2));
-  let pL = points[idx];
-  let pR = points[idx + 1];
-
-  if (targetFreq < pL.freq || targetFreq > pR.freq) { // not hit
-    const range = findInterpolationRange(points, targetFreq, 'freq');
-    if (!range) return null;
-    pL = points[range.right]; // Точка с частотой < targetFreq
-    pR = points[range.left];  // Точка с частотой > targetFreq
-  }
-  const deltaFreq = pR.freq - pL.freq;
-  if (deltaFreq === 0) return { ...pL };
-  const t = (targetFreq - pL.freq) / deltaFreq;
-  const x = pL.x + t * (pR.x - pL.x);
-  const y = pL.y + t * (pR.y - pL.y);
-  if (typeof pL.value === 'object') {
-    const v = {
-      re: pL.value.re + t * (pR.value.re - pL.value.re),
-      im: pL.value.im + t * (pR.value.im - pL.value.im)
-    };
-    return {...pL, freq: targetFreq, x: x, y: y, value: v };
-  }
-  const v = pL.value + t * (pR.value - pL.value);
-  return {...pL, freq: targetFreq, x: x, y: y, value: v };
-}
 
 const BIG_PREFIXES = ['k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const SMALL_PREFIXES = ['m', 'µ', 'n', 'p', 'f', 'a', 'z', 'y'];
@@ -435,7 +364,7 @@ const TRACE_TYPES = {
   LOGMAG: { name: 'Logmag',     f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: VNA_MATH.logmag },
   PHASE:  { name: 'Phase',      f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: VNA_MATH.phase },
   UPHASE: { name: 'Phase ⟲',    f: '%.3F°',  valid: CH_ALL, top: 720, bottom: -720, calc: VNA_MATH.phase_unwrap },
-  DELAY:  { name: 'Group Delay',f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freq, data, freqs) => VNA_MATH.groupdelay(data, i, freqs) },
+  DELAY:  { name: 'Group Delay',f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freqs, data) => VNA_MATH.groupdelay(data, i, freqs) },
   LINEAR: { name: 'Linear',     f: '%.4F',   valid: CH_ALL, top:   1, bottom:    0, calc: VNA_MATH.linear, min: 0},
   REAL:   { name: 'Real',       f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.real  },
   IMAG:   { name: 'Imaginary',  f: '%.6F',   valid: CH_ALL, top:   1, bottom:   -1, calc: VNA_MATH.imag  },
@@ -447,12 +376,12 @@ const TRACE_TYPES = {
   X:      { name: 'Reactance',  f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom: -500, calc: VNA_MATH.reactance },
   Z:      { name: '|Z|',        f: '%.3FΩ', valid: CH_REFLECT, top: 500, bottom:    0, calc: VNA_MATH.mod_z, min: 0 },
   ZPHASE: { name: 'Z PHASE',    f: '%.3F°', valid: CH_REFLECT, top:  90, bottom:  -90, calc: VNA_MATH.phase_z },
-  CS:     { name: 'Series C',   f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.series_c(s, freq) },
-  LS:     { name: 'Series L',   f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.series_l(s, freq) },
+  CS:     { name: 'Series C',   f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freqs) => VNA_MATH.series_c(s, freqs[i]) },
+  LS:     { name: 'Series L',   f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freqs) => VNA_MATH.series_l(s, freqs[i]) },
   RP:     { name: 'Parallel R', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:    0, calc: VNA_MATH.parallel_r },
   XP:     { name: 'Parallel X', f: '%.3FΩ', valid: CH_REFLECT, top:1000, bottom:-1000, calc: VNA_MATH.parallel_x },
-  CP:     { name: 'Parallel C', f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freq) => VNA_MATH.parallel_c(s, freq) },
-  LP:     { name: 'Parallel L', f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freq) => VNA_MATH.parallel_l(s, freq) },
+  CP:     { name: 'Parallel C', f: '%.4FF', valid: CH_REFLECT, top:1e-9, bottom:-1e-9, calc: (s, i, freqs) => VNA_MATH.parallel_c(s, freqs[i]) },
+  LP:     { name: 'Parallel L', f: '%.4FH', valid: CH_REFLECT, top:1e-8, bottom:-1e-8, calc: (s, i, freqs) => VNA_MATH.parallel_l(s, freqs[i]) },
   Q:      { name: 'Q factor',   f: '%.4F',  valid: CH_REFLECT, top: 100, bottom:    0, calc: VNA_MATH.qualityfactor, min: 0 },
   G:      { name: 'Conductance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom:    0, calc: VNA_MATH.conductance },
   B:      { name: 'Susceptance',f: '%.3FS', valid: CH_REFLECT, top: 0.1, bottom: -0.1, calc: VNA_MATH.susceptance },
@@ -592,9 +521,7 @@ function formatSmithValue(type, freq, value) {
 VNA_MATH.fft = function(data, inverse) {
   const N = data.length >> 1;
   if (N <= 1) return;
-  
   const levels = Math.log2(N) | 0;
-  
   // Bit-reversal permutation
   for (let i = 0; i < N; i++) {
     const j = VNA_MATH._reverseBits(i, levels);
@@ -603,7 +530,6 @@ VNA_MATH.fft = function(data, inverse) {
       t = data[2*i+1]; data[2*i+1] = data[2*j+1]; data[2*j+1] = t;
     }
   }
-  
   // Cooley-Tukey
   for (let size = 2; size <= N; size <<= 1) {
     const half = size >> 1;
@@ -674,12 +600,10 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   const FFT_SIZE = (1 << Math.ceil(Math.log2(isLP ? 2 * N : N))) * iterp;
 
   const buf = new Float64Array(2 * FFT_SIZE);
-
   // ---- 1. Параметры окна ----
   const offset = isLP ? N : 0;
   const window_size = N + offset;
   const beta = KAISER_BETA[td.window] ?? 0;
-
   // ---- 2. Расчёт масштаба (по аналогии с C-кодом) ----
   let scale = 0;
   if (td.mode === 'lowpass_step') { // Для step: window_scale = 1 / (FFT_SIZE * I0(beta))
@@ -713,7 +637,6 @@ VNA_MATH.performTD = function(freqs, sData, td) {
     const p = sData[lo].phase + t * (sData[hi].phase - sData[lo].phase);
     return { re: a * Math.cos(p), im: a * Math.sin(p) };
   };
-
   // ---- 3. Заполнение спектра (применяем окно и масштаб) ----
   if (isLP) { // — интерполяция по исходным данным к DC
     for (let i = 0; i < N; i++) {
@@ -751,10 +674,13 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   // ---- 6. Формирование результата ----
   const times = new Array(FFT_SIZE);
   const values = new Array(FFT_SIZE);
-
+  const _freqs = new Array(FFT_SIZE);
+  const f0 = (isLP) ? 0 : freqs[0];
+  const step = (freqs[N-1] - freqs[0]) / (FFT_SIZE - 1);
   for (let n = 0; n < FFT_SIZE; n++) {
     values[n] = { re: buf[2 * n], im: buf[2 * n + 1] };
     times[n] = n / (FFT_SIZE * df);
+    _freqs[n] = f0 + n * step;
   }
-  return { times, values, _M: FFT_SIZE, _df: df };
+  return { times, freqs: _freqs, values};
 };
