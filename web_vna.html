@@ -253,7 +253,7 @@ const freqInputs = {
 };
 
 function updateFreqInputs() {
-  const view = graph.areas[0].view;
+  const view = graph.areas[0].viewFreq;
   const start = view.xMin, stop = view.xMax;
   const center = (start + stop) / 2;
   const span = (stop - start);
