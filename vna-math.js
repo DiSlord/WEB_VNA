@@ -154,35 +154,39 @@ const VNA_MATH = {
  },
 
 /**
- * Интерполяция комплексного значения в полярных координатах.
- * @param {Array}  data       - массив {re, im, [phase]}
- * @param {Array}  freqs      - массив частот (синхронный с sData)
+ * Интерполяция (и экстраполяция) комплексного значения в полярных координатах.
+ * @param {Array}  data       - массив {re, im, amp, phase}
+ * @param {Array}  freqs      - массив частот (синхронный с data)
  * @param {number} f          - целевая частота
  * @returns {{re: number, im: number}|null}
  */
- interpPolar: function(data, freqs, f) {
-  const N = freqs.length;
-  if (N === 0) return null;
-  if (N === 1) return { re: data[0].re, im: data[0].im };
-  // Экстраполяция за границы
-  if (f <= freqs[0] || f >= freqs[N-1]) return null;
-  // Бинарный поиск O(log N)
-  let lo = 0, hi = N - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (freqs[mid] <= f) lo = mid; else hi = mid;
+interpPolar: function(data, freqs, f) {
+  const N = freqs.length - 1;
+  if (N < 0) return null;
+  if (N === 0) return { re: data[0].re, im: data[0].im };
+  let lo = 0;
+  if (f >= freqs[N]) lo = N - 1;
+  else if (f > freqs[0]) {
+    for (let step = 1<<(Math.log2(N)|0); step > 0; step >>= 1) {
+      const nxt = lo + step;
+      if (nxt < N && freqs[nxt] <= f) lo = nxt;
+    }
   }
+  const hi = lo + 1;
   const a1 = data[lo].amp, p1 = data[lo].phase, f1 = freqs[lo];
-  const a2 = data[hi].amp, p2 = data[hi].phase, f2 = freqs[hi];
-
-  const t = (f - f1) / (f2 - f1);
+  const a2 = data[hi].amp, p2 = data[hi].phase, df = freqs[hi] - f1;
+  const t = df !== 0 ? (f - f1) / df : 0;
   const a = a1 + t * (a2 - a1);
   const p = p1 + t * (p2 - p1);
 
   return { re: a * Math.cos(p), im: a * Math.sin(p) };
  },
+
 };
 
+/*
+   printf support
+ */
 const BIG_PREFIXES = ['k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const SMALL_PREFIXES = ['m', 'µ', 'n', 'p', 'f', 'a', 'z', 'y'];
 
@@ -315,26 +319,20 @@ function formatFreqValue(freq, precision = 0) {
  * @param {number} totalPixels - Общая ширина или высота области в пикселях
  * @returns {Object} { ticks: number[], step: number }
  */
-const nice = [1, 2, 2.5, 5, 10];
 function getNiceTicks(min, max, minPixelSpacing, totalPixels) {
   if (min === max) return { ticks: [min], step: 1 };
   const range = max - min;
   const roughStep = range * minPixelSpacing / totalPixels;
   const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
   const normalized = roughStep / magnitude;
-  const step = (nice.find(n => normalized <= n) || nice[nice.length - 1]) * magnitude;
-  const stepOrder = Math.floor(Math.log10(step));
-  const precision = Math.max(0, -stepOrder + 1); // +1 для запаса
+  const step = ([1, 2, 2.5, 5, 10].find(n => normalized <= n) || 10) * magnitude;
+  const precision = Math.max(0, -Math.floor(Math.log10(step)) + 1);
   const epsilon = step * 1e-9;
   const start = Math.ceil((min - epsilon) / step) * step;
   const end = Math.floor((max + epsilon) / step) * step;
-  
   const ticks = [];
-  for (let i = 0; ; i++) {
-    const v = start + i * step;
-    if (v > end + epsilon) break;
-    ticks.push(Number(v.toFixed(precision)));
-  }
+  const count = Math.round((end - start) / step) + 1;
+  for (let i = 0; i < count; i++) ticks.push(Number((start + i * step).toFixed(precision)));
   return { ticks, step };
 }
 
@@ -518,13 +516,23 @@ function formatSmithValue(type, freq, value) {
 // ============================================
 // IFFT (ненормированное, radix-2)
 // ============================================
-VNA_MATH.fft = function(data, inverse) {
+function reverseBits(x, n) {
+  x = ((x & 0x55555555) << 1) | ((x & 0xAAAAAAAA) >>> 1);
+  x = ((x & 0x33333333) << 2) | ((x & 0xCCCCCCCC) >>> 2);
+  x = ((x & 0x0F0F0F0F) << 4) | ((x & 0xF0F0F0F0) >>> 4);
+  x = ((x & 0x00FF00FF) << 8) | ((x & 0xFF00FF00) >>> 8);
+  x = ((x & 0x0000FFFF) << 16) | ((x & 0xFFFF0000) >>> 16);
+  return x >>> (32 - n);
+}
+
+function fft(data, inverse) {
   const N = data.length >> 1;
   if (N <= 1) return;
+  if ((N & (N - 1)) !== 0) throw new Error('FFT length must be power of two');
   const levels = Math.log2(N) | 0;
   // Bit-reversal permutation
   for (let i = 0; i < N; i++) {
-    const j = VNA_MATH._reverseBits(i, levels);
+    const j = reverseBits(i, levels);
     if (j > i) {
       let t = data[2*i]; data[2*i] = data[2*j]; data[2*j] = t;
       t = data[2*i+1]; data[2*i+1] = data[2*j+1]; data[2*j+1] = t;
@@ -533,28 +541,22 @@ VNA_MATH.fft = function(data, inverse) {
   // Cooley-Tukey
   for (let size = 2; size <= N; size <<= 1) {
     const half = size >> 1;
-    const step = N / size;
-    for (let i = 0; i < N; i += size) {
-      for (let j = i, k = 0; j < i + half; j++, k += step) {
-        const ang = (inverse ? 2 : -2) * Math.PI * k / N;
-        const wR = Math.cos(ang), wI = Math.sin(ang);
-        const b = j + half;
-        const tR = data[2*b] * wR - data[2*b+1] * wI;
-        const tI = data[2*b] * wI + data[2*b+1] * wR;
-        data[2*b]   = data[2*j] - tR;
-        data[2*b+1] = data[2*j+1] - tI;
-        data[2*j]   += tR;
-        data[2*j+1] += tI;
-      }
+    const step =  (inverse ? 2 : -2) * Math.PI / size;
+    for (let j = 0; j < half; j++) {
+      const ang = j * step;
+      const wR = Math.cos(ang), wI = Math.sin(ang);
+      for (let i = 0; i < N; i += size) {
+        const a = ((i + j) << 1), b = a + size;
+        const ar = data[a], ai = data[a + 1];
+        const br = data[b], bi = data[b + 1];
+        const tr = br * wR - bi * wI;
+        const ti = br * wI + bi * wR;
+        data[a] = ar + tr; data[a + 1] = ai + ti;
+        data[b] = ar - tr; data[b + 1] = ai - ti;
+     }
     }
   }
-};
-
-VNA_MATH._reverseBits = function(val, width) {
-  let r = 0;
-  for (let i = 0; i < width; i++, val >>= 1) r = (r << 1) | (val & 1);
-  return r;
-};
+}
 
 // ============================================
 // Вспомогательные функции для окна Кайзера
@@ -614,33 +616,10 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   }
   scale = 1.0 / scale;
 
-  const interpS = function(f) {
-    const n = freqs.length;
-    if (n === 0) return null;
-    if (n === 1) return { re: sData[0].re, im: sData[0].im };
-    let lo, hi;
-    // Выбор интервала для интерполяции / экстраполяции
-    if (f <= freqs[0]) { lo = 0; hi = 1; }
-    else if (f >= freqs[n - 1]) { lo = n - 2; hi = n - 1; }
-    else {
-      lo = 0; hi = n - 1;
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (freqs[mid] <= f) lo = mid;
-        else hi = mid;
-      }
-    }
-    // Единая формула линейной интерполяции / экстраполяции
-    const df = (freqs[hi] - freqs[lo]);
-    const t = df !== 0 ? (f - freqs[lo]) / df : 0;
-    const a = sData[lo].amp + t * (sData[hi].amp - sData[lo].amp);
-    const p = sData[lo].phase + t * (sData[hi].phase - sData[lo].phase);
-    return { re: a * Math.cos(p), im: a * Math.sin(p) };
-  };
   // ---- 3. Заполнение спектра (применяем окно и масштаб) ----
   if (isLP) { // — интерполяция по исходным данным к DC
     for (let i = 0; i < N; i++) {
-      const S = interpS(df * i);
+      const S = VNA_MATH.interpPolar(sData, freqs, df * i);
       const w = kaiser_window_ext(i + offset, window_size, beta) * scale;
       buf[2*i]   = S.re * w;
       buf[2*i+1] = S.im * w;
@@ -661,7 +640,7 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   }
 
   // ---- 4. Обратное БПФ (без нормировки) ----
-  VNA_MATH.fft(buf, true);
+  fft(buf, true);
 
   // ---- 5. Integrate для lowpass step ----
   if (td.mode === 'lowpass_step') {

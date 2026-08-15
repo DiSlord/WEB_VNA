@@ -509,9 +509,9 @@ function buildAreaPanels() {
 
     // Кнопка сброса
     const btnReset = document.createElement('button');
-    btnReset.textContent = '⟲';
-    btnReset.title = 'Reset scale';
-    btnReset.addEventListener('click', () => { area.resetView(graph.data); graph.redraw(true); });
+    btnReset.textContent = '⇄';
+    btnReset.title = 'Reset X';
+    btnReset.addEventListener('click', () => { area.resetX(); graph.redraw(true); });
     panel.appendChild(btnReset);
 
     areaPanels.appendChild(panel);
@@ -732,34 +732,30 @@ function initLayouts() {
 // =============================
 //  Инициализация
 // =============================
-function main() {
-  vnaData = new VNAData(5);
-  graph = new VNAGraph('vnaCanvas', vnaData);
-
-  // 2. UI
+async function main() {
+  // Web UI
   initThemes();
-  graph.updateColors();
   hideContextMenu();
+
+  // Data and renders
+  vnaData = new VNAData(5);
+  await vnaData.init();
+  graph = new VNAGraph('vnaCanvas', vnaData);
 
   // 3. Данные и отрисовка
   initLayouts();
-  loadTestData();
-  graph.resetView();
   updateFreqInputs();
   updateAllTraceButtons();
   updateMarkerTable();
 
   // 4. События
-  window.addEventListener('resize', () => {graph.resize();});
+  // File load and Drag & drop support
   fileInput.addEventListener('change', async e => {loadFile(e.target.files[0], e.target.slot);});
-
-  // Drag & drop support
   document.addEventListener('dragover', e => e.preventDefault());
   document.addEventListener('drop', async e => {e.preventDefault(); loadFile(e.dataTransfer.files[0], 0);});
   
-  //  Block events if venu open
-  ['mousemove', 'mousedown', 'wheel', 'dblclick'].forEach(evt => { contextMenu.addEventListener(evt, e => e.stopPropagation());
-});
+  //  Block events if menu open
+  ['mousemove', 'mousedown', 'wheel', 'dblclick'].forEach(evt => contextMenu.addEventListener(evt, e => e.stopPropagation()));
 }
 
 document.addEventListener('DOMContentLoaded', main);
