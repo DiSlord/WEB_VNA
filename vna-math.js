@@ -204,8 +204,8 @@ function _formatFreq(absFreq, precision) {
     const divider = Math.pow(1000, prefixIndex);
     const numValue = absFreq / divider;
     formatted = Number(numValue.toFixed(effPrec)).toString();
-  }
-  return formatted + ' ' + prefix;
+  } else formatted+= ' ';
+  return formatted + prefix;
 }
 
 function _formatFloat(absVal, precision) {
@@ -359,7 +359,7 @@ function getChannelList(mask) {
 
 const TRACE_TYPES = {
   // --- Общие для всех 4 каналов ---
-  LOGMAG: { name: 'Logmag',     f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: VNA_MATH.logmag },
+  LOGMAG: { name: 'Logmag',     f: '%.3fdB', valid: CH_ALL, top  : 0, bottom:  -80, calc: VNA_MATH.logmag, min: -1000 },
   PHASE:  { name: 'Phase',      f: '%.3F°',  valid: CH_ALL, top :180, bottom: -180, calc: VNA_MATH.phase },
   UPHASE: { name: 'Phase ⟲',    f: '%.3F°',  valid: CH_ALL, top: 720, bottom: -720, calc: VNA_MATH.phase_unwrap },
   DELAY:  { name: 'Group Delay',f: '%.4Fs',  valid: CH_ALL, top:1e-6, bottom:-1e-6, calc: (s, i, freqs, data) => VNA_MATH.groupdelay(data, i, freqs) },

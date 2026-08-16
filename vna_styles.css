@@ -55,19 +55,21 @@
 /* =========================================
    3. ШРИФТЫ ГРАФИКА (Canvas)
    ========================================= */
- --font-axis:       700 15px/1.0 'Arial', sans-serif;
- --font-axis-label: 400 12px/1.0 'Arial', sans-serif;
- --font-marker:     400 14px/1.0 'Arial', sans-serif;
- --font-amarker:    700 15px/1.0 'Arial', sans-serif;
- --font-tooltip:    400 14px 'Arial', sans-serif;
+ --font-graph: 'Tahoma', Roboto, sans-serif;
+ --font-header:     700 15px/1.0 var(--font-graph); /* Заголовок (под панелями) */
+ --font-axis:       400 12px/1.0 var(--font-graph); /* Метки осей */
+ --font-marker:     400 14px/1.0 var(--font-graph); /* Метки маркеров */
+ --font-amarker:    600 14px/1.0 var(--font-graph); /* Выбранный маркер */
+ --font-tooltip:    400 14px/1.0 var(--font-graph); /* Текст в тултипе */
 
 /* =========================================
    4. ШРИФТЫ UI (Интерфейс)
    ========================================= */
- --font-ui:         400 14px/1.0 'Arial', sans-serif; /* Основной текст, лейблы, селекты */
- --font-ui-small:   400 12px/1.0 'Arial', sans-serif; /* Таблицы, контекстное меню */
- --font-ui-title:   700 15px/1.0 'Arial', sans-serif; /* Заголовки секций */
- --font-ui-btn:     700 14px/1.0 'Arial', sans-serif; /* Текст всех кнопок */
+ --font: 'Arial', sans-serif;
+ --font-ui:         400 14px/1.0 var(--font); /* Основной текст, лейблы, селекты */
+ --font-ui-small:   400 13px/1.0 var(--font); /* Таблицы, контекстное меню */
+ --font-ui-title:   700 15px/1.0 var(--font); /* Заголовки секций */
+ --font-ui-btn:     700 14px/1.0 var(--font); /* Текст всех кнопок */
 }
 
 /* =========================================

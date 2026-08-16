@@ -230,7 +230,7 @@ interpolatePoint(points, targetX) {
   const interpYVal = (typeof pL.yVal === 'object' && pL.yVal !== null)
     ? { re: pL.yVal.re + t * (pR.yVal.re - pL.yVal.re), im: pL.yVal.im + t * (pR.yVal.im - pL.yVal.im) }
     : pL.yVal + t * (pR.yVal - pL.yVal);
-  return {...pL, xVal: targetX, yVal: interpYVal, x: pL.x + t * (pR.x - pL.x), y: pL.y + t * (pR.y - pL.y) };
+  return {...pL, xVal: targetX, yVal: interpYVal || pL.yVal, x: pL.x + t * (pR.x - pL.x), y: pL.y + t * (pR.y - pL.y) };
 }
 
 initViewFromSlotData(xData, typeDef) {
@@ -398,12 +398,12 @@ drawHeader(ctx, graph) {
   const label = `[${channelNames}]  ${typeDef.name}${suffix ? ` (${suffix})` : ''}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.font = graph.getFont('axis');
+  ctx.font = graph.getFont('header');
   ctx.fillText(label, left, (top + a_top)/2);
 }
 
 drawGridLin(ctx, graph) {
-  const { left, right, top, bottom, width, height, min_grid_x, min_grid_y } = this.bounds;
+  const { left, right, top, bottom, a_bottom, width, height, min_grid_x, min_grid_y } = this.bounds;
   let { xMin, xMax, yMin, yMax } = this.view;
   const { MARKER_DASH, MARKER_LINE, GRID_LINE, GRID_DASH } = graph.config;
 
@@ -418,15 +418,15 @@ drawGridLin(ctx, graph) {
   ctx.strokeStyle = graph.getCSSColor('--plot-grid'); ctx.lineWidth = GRID_LINE;
   ctx.setLineDash(GRID_DASH);
 
-  ctx.font = graph.getFont('axis-label');
+  ctx.font = graph.getFont('axis');
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   ctx.beginPath();
   const format = this.td.enabled ? (this.td.xAxisMode === 'distance' ? '%.3Fm' : '%.3Fs') : '%.3qHz';
   for (const tick of xTicks.ticks) {
     const x = left + (tick - xMin) / (xMax - xMin) * width;
     this.drawLine(ctx, x, top, x, bottom);
-    ctx.fillText(formatValue(format, tick), x, bottom + 4);
+    ctx.fillText(formatValue(format, tick), x, (bottom + a_bottom)/2);
   }
 
   const { typeDef } = this.trace;
@@ -503,7 +503,7 @@ drawGridComplex(ctx, graph) {
   ctx.restore();
 
   ctx.fillStyle = graph.getCSSColor('--plot-axis-text');
-  ctx.font = graph.getFont('axis-label');
+  ctx.font = graph.getFont('axis');
   for (const val of params.gridRe) this.drawComplexLabel(ctx, val, params.reLabel(val));
   for (const val of params.gridIm) this.drawComplexLabel(ctx, val, params.imLabel(val));
   if (params.edgeLabels) for (const l of params.edgeLabels) this.drawComplexLabel(ctx, l.val, l);
@@ -693,7 +693,7 @@ drawCursorInfoComplex(ctx, graph) {
     ctx.restore();
 
 //  ctx.fillStyle = graph.getCSSColor('--tooltip-text');
-//  ctx.font = graph.getFont('axis-label');
+//  ctx.font = graph.getFont('axis');
 //  this.drawComplexLabel(ctx, re, params.reLabel(re));
 //  this.drawComplexLabel(ctx, im, params.imLabel(im));
   }
@@ -737,7 +737,7 @@ drawCursorInfoLin(ctx, graph) {
     }
     const slotName = entry.slot === 0 ? entry.channel : `M${entry.slot} ${entry.channel}`;
     const valText = formatValue(typeDef.f, interp.yVal);
-    infoLines.push(`${slotName}: ${valText}`);
+    infoLines.push(`${slotName}: ${valText} `);
   }
   this.drawTooltip(ctx, graph, mouse.x, mouse.y, infoLines);
 }
@@ -755,7 +755,7 @@ constructor(canvasId, data) {
    new Area({ leftPct: 0.0, rightPct: 0.5, topPct: 0.5, bottomPct: 1 }),
    new Area({ leftPct: 0.5, rightPct: 1.0, topPct: 0.5, bottomPct: 1 })
   ];
-  this.areas[0].setTraceType('LOGMAG');
+  this.areas[0].setTraceType('LOGMAG'); this.areas[0].setRange(1e6, 300e6);
   this.areas[1].setTraceType('SWR');
   this.areas[2].setTraceType('R');
   this.areas[3].setTraceType('PHASE');

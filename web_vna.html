@@ -252,9 +252,13 @@ const freqInputs = {
   span:   document.getElementById('freqSpan')
 };
 
-function updateFreqInputs() {
+function getCurrentFreqs() {
   const view = graph.areas[0].viewFreq;
-  const start = view.xMin, stop = view.xMax;
+  return {start: view.xMin, stop: view.xMax};
+}
+
+function updateFreqInputs() {
+  const {start, stop} = getCurrentFreqs();
   const center = (start + stop) / 2;
   const span = (stop - start);
   const active = document.activeElement;
@@ -271,8 +275,7 @@ function onFreqInputChange(e) {
   const field = e.target.dataset.field;
   const value = getValue(e.target.value);
   if (isNaN(value) || value < 0) { updateFreqInputs(); return; }
-  const view = graph.areas[0].view;
-  let start = view.xMin, stop = view.xMax;
+  let {start, stop} = getCurrentFreqs();
   const freq = getValue(e.target.value);
   let span = (stop - start) / 2;
   let center = (start + stop) / 2;
