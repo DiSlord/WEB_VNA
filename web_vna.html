@@ -379,11 +379,8 @@ async function loadFile(file, slot = 0) {
   const format = ['s1p', 's2p'].find(f => f === ext);
   if (!format) return;
   const buffer = await file.arrayBuffer();
-  const text = new TextDecoder().decode(buffer);
-  const parsed = vnaData.parseSnP(text);
-  if (!parsed || !parsed.freqs || parsed.freqs.length === 0) return;
-
-  vnaData.setSlotData(slot, parsed.freqs, parsed.S11, parsed.S21, parsed.S12, parsed.S22);
+  const data = new TextDecoder().decode(buffer);
+  if (!vnaData.loadSnP(slot, data)) return;
   if (slot == 0) graph.resetToRange(slot);
   graph.visibility[slot] = true;
   updateTraceButton(slot);

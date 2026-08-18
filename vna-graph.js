@@ -764,6 +764,8 @@ constructor(canvasId, data) {
   this.markers = []; this.selectedMarkerIndex = -1;
   this.velocityFactor = 0.66;   // один на все Area
 
+  this.ctrlPressed = false;
+
   this.loadState();
   this.mouse = { x: 0, y: 0, handler: null, handlerData: null };
   this.colors = {};
@@ -795,6 +797,9 @@ setupEventHandlers() {
   // Автосохранение состояния
   document.addEventListener('visibilitychange', () => {if (document.visibilityState === 'hidden') this.saveState(); });
   window.addEventListener('beforeunload', () => this.saveState());
+
+  window.addEventListener('keydown', (e) => { if (e.key === 'Control') this.ctrlPressed = true;});
+  window.addEventListener('keyup',   (e) => { if (e.key === 'Control') this.ctrlPressed = false;});
 }
 
 // Сохранение/загрузка всего состояния в localStorage
