@@ -10,10 +10,12 @@ constructor(slotsCount = 5) {
   this.slotsCount = slotsCount;
   this.slots = [];
   this.td_slots = [];
+  this.renorm = [];
   this.storage = new VNAStorage();
   for (let i = 0; i < slotsCount; i++) {
     this.slots.push({ uid: 0, z0: 50, frequencies: [], S11: [], S21: [], S12: [], S22: [] });
     this.td_slots.push({ uid: 0, cache: {} });
+    this.renorm.push({ uid: 0, z0: 0, cache: {}});
   }
 }
 
@@ -36,8 +38,8 @@ _saveSlot(slot) {
   this.storage.saveSlot(slot, data);
 }
 
-static tdKey(td, ch) {
-  const s = `${td.mode}|${td.window}|${ch}`;
+static tdKey(td, ch, z0) {
+  const s = `${td.mode}|${td.window}|${ch}|${z0}`;
   let h = 0;
   for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
   return h;
@@ -69,17 +71,35 @@ clearSlot(slot) {
   this.storage.deleteSlot(slot);
 }
 
+getSlotZ0(slot) {
+  return this.slots[slot].z0 ?? 50;
+}
+
 getSlot(slot, channel, td = null) {
   const s = this.slots[slot];
-  const data = s?.[channel];
-  if (!data?.length) return {z0: 50, freqs: [], values: [] };
-  if (data[0].phase === undefined) VNA_MATH.addPolarData(data);
-  if (!td?.enabled) return {z0: s.z0, freqs: s.frequencies, values: data };
   const td_slot = this.td_slots[slot];
-  if (td_slot.uid !== s.uid) { td_slot.uid = s.uid; td_slot.cache = {};  }
-  const key = VNAData.tdKey(td, channel);
-  const c = td_slot.cache[key] ??= VNA_MATH.performTD(s.frequencies, data, td);
-  return {z0: s.z0, times: c.times, freqs: c.freqs, values: c.values ?? [] };
+  const targetZ0 = VNA_MATH.Z0;
+  let data = s;
+  if (s.z0 !== targetZ0 && s.frequencies.length > 0) {
+    const r = this.renorm[slot];
+    if (s.uid !== r.uid || r.z0 !== targetZ0) {
+      r.cache = renormZ(s, targetZ0);
+      r.z0 = targetZ0;
+      r.uid = s.uid;
+    }
+    data = r.cache;
+  }
+
+  const values = data?.[channel];
+  if (!values?.length) return { z0: data.z0, freqs: [], values: [] };
+
+  if (values[0].phase === undefined) VNA_MATH.addPolarData(values);
+  if (!td?.enabled) return { z0: data.z0, freqs: data.frequencies, values };
+
+  if (td_slot.uid !== data.uid) { td_slot.uid = data.uid; td_slot.cache = {}; }
+  const key = VNAData.tdKey(td, channel, data.z0);
+  const c = td_slot.cache[key] ??= VNA_MATH.performTD(data.frequencies, values, td);
+  return { z0: data.z0, times: c.times, freqs: c.freqs, values: c.values ?? [] };
 }
 
 hasData(slot) {

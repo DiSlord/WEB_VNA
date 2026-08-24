@@ -1,6 +1,11 @@
-const VNA_MATH = {
- Z0: 50.0,
 
+// Complex calculation help
+function cmul(a, b) { return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re };}
+function cdiv(a, b, b_mag2) { return { re: (a.re * b.re + a.im * b.im) / b_mag2, im: (a.im * b.re - a.re * b.im) / b_mag2 }; }
+
+const VNA_MATH = {
+ Z0: 50,
+ setZ0: (Z0) => {if (!isNaN(Z0) && Z0 > 0) VNA_MATH.Z0 = Z0},
  // Вспомогательные
  _l: (re, im) => (re * re + im * im),
  _s11_r: (re, im, z) => Math.abs(2 * z * re / VNA_MATH._l(re, im) - z),
@@ -431,8 +436,8 @@ const COMPLEX_PARAMS = {
  },
  // ---- R + X (Reflection) ----
  RX: {
-  gridRe: [0.2, 0.5, 1, 2, 5, 10].map(v => v * VNA_MATH.Z0),
-  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0),
+  get gridRe() { return [0.2, 0.5, 1, 2, 5, 10].map(v => v * VNA_MATH.Z0); },
+  get gridIm() { return [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0); },
   reCircle(R) { return { cx: R / (R + VNA_MATH.Z0), cy: 0, r: VNA_MATH.Z0 / (R + VNA_MATH.Z0) }; },
   reLabel(R)  { return { nx: (R - VNA_MATH.Z0) / (R + VNA_MATH.Z0), ny: 0 }; },
   imCircle(X) { return Math.abs(X) < 0.1 ? H_AXIS : { cx: 1, cy: VNA_MATH.Z0 / X, r: VNA_MATH.Z0 / X }; },
@@ -441,8 +446,8 @@ const COMPLEX_PARAMS = {
  },
  // ---- G + B (Admittance) ----
  GB: {
-  gridRe: [0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0),
-  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0),
+  get gridRe() { return [0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0); },
+  get gridIm() { return [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5].map(v => v / VNA_MATH.Z0); },
   reCircle(G) { const gn = G * VNA_MATH.Z0; return { cx: -gn / (gn + 1), cy: 0, r: 1 / (gn + 1) }; },
   reLabel(G)  { const gn = G * VNA_MATH.Z0; return { nx: (1 - gn) / (1 + gn), ny: 0 }; },
   imCircle(B) { const bn = B * VNA_MATH.Z0; return Math.abs(bn) < 1e-2 ? H_AXIS : { cx: -1, cy: -1 / bn, r: -1 / bn }; },
@@ -451,8 +456,8 @@ const COMPLEX_PARAMS = {
  },
  // ---- Rp + Xp (Parallel) ----
  RpXp: {
-  gridRe: [0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0),
-  gridIm: [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5, Infinity].map(v => v * VNA_MATH.Z0),
+  get gridRe() { return [0.2, 0.5, 1, 2, 5].map(v => v * VNA_MATH.Z0); },
+  get gridIm() { return [-5, -2, -1, -0.5, -0.2, 0, 0.2, 0.5, 1, 2, 5, Infinity].map(v => v * VNA_MATH.Z0); },
   reCircle(Rp) { return { cx: -VNA_MATH.Z0 / (VNA_MATH.Z0 + Rp), cy: 0, r: Rp / (VNA_MATH.Z0 + Rp) }; },
   reLabel(Rp)  { return { nx: (Rp - VNA_MATH.Z0) / (Rp + VNA_MATH.Z0), ny: 0 }; },
   imCircle(Xp) { const v = Xp / VNA_MATH.Z0; return Math.abs(v) > 100 ? H_AXIS : { cx: -1, cy: v, r: v }; },
@@ -461,8 +466,8 @@ const COMPLEX_PARAMS = {
  },
  // ---- S21 Series ----
  S21SER: {
-  gridRe: [-500, -250, -200, -175, -125, -100, -75, -25, 0, 50, 250],
-  gridIm: [-200, -130, -50, -25, 0, 25, 50, 100, 130, 200],
+  get gridRe() { return [-10, -5, -4, -3.5, -2.5, -2, -1.5, -0.5, 0, 1, 5].map(v => v * VNA_MATH.Z0); },
+  get gridIm() { return [-4, -2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 2.8, 4].map(v => v * VNA_MATH.Z0); },
   reCircle(R) { const v = (R + 2 * VNA_MATH.Z0); return Math.abs(v) < 0.1 ? V_AXIS : { cx: VNA_MATH.Z0 / v, cy: 0, r: VNA_MATH.Z0 / v }; },
   reLabel(R)  { const v = R / (2 * VNA_MATH.Z0) + 1; return  (Math.abs(v) >= 1) ? { nx: 1/v, ny: 0 } : { nx: v, ny: Math.sqrt(1 - v*v) }; },
   imCircle(X) { const v =-VNA_MATH.Z0 / X; return Math.abs(v) > 100 ? H_AXIS : { cx: 0, cy: v, r: v }; },
@@ -470,8 +475,8 @@ const COMPLEX_PARAMS = {
  },
  // ---- S21 Shunt ----
  S21SH: {
-  gridRe: [-10, -6.25, 0, 12.5, 25, 50],
-  gridIm: [-50, -25, -12.5, -6.25, 0, 6.25, 12.5, 25, 50],
+  get gridRe() { return [-0.2, -0.125, 0, 0.25, 0.5, 1].map(v => v * VNA_MATH.Z0); },
+  get gridIm() { return [-1, -0.5, -0.25, -0.125, 0, 0.125, 0.25, 0.5, 1].map(v => v * VNA_MATH.Z0); },
   reCircle(R) { const v = VNA_MATH.Z0 / (4*R + 2*VNA_MATH.Z0); return { cx: 1 - v, cy: 0, r: v }; },
   reLabel(R)  { const v = VNA_MATH.Z0 / (2*R +   VNA_MATH.Z0); return { nx: 1 - v, ny: 0 }; },
   imCircle(X) { const v = VNA_MATH.Z0 / (4*X); return Math.abs(v) > 100 ? H_AXIS : { cx: 1, cy: v, r: v }; },
@@ -624,8 +629,7 @@ VNA_MATH.performTD = function(freqs, sData, td) {
       buf[2*i]   = S.re * w;
       buf[2*i+1] = S.im * w;
     }
-    buf[0] = Math.hypot(buf[0], buf[1]) // DC amplitude only
-    buf[1] = 0;
+    buf[1] = 0; // DC real only
     buf[2 * (FFT_SIZE / 2) + 1] = 0;    // Найквист imag = 0
     for (let i = 1; i < N; i++) {
       buf[2*(FFT_SIZE-i)  ] =  buf[2*i  ];
@@ -663,3 +667,47 @@ VNA_MATH.performTD = function(freqs, sData, td) {
   }
   return { times, freqs: _freqs, values};
 };
+
+function renormZ(slot, targetZ0) {
+  const g = (targetZ0 - slot.z0) / (targetZ0 + slot.z0);
+  const g2 = g * g;
+  const one_minus_g2 = 1 - g2;
+
+  const { frequencies, S11, S21, S12, S22 } = slot;
+  const len = frequencies.length;
+  const new_S11 = new Array(len);
+  const new_S21 = new Array(len);
+  const new_S12 = new Array(len);
+  const new_S22 = new Array(len);
+
+  for (let i = 0; i < len; i++) {
+    const s11 = S11?.[i] ?? { re: 0, im: 0 };
+    const s21 = S21?.[i] ?? { re: 0, im: 0 };
+    const s12 = S12?.[i] ?? { re: 0, im: 0 };
+    const s22 = S22?.[i] ?? { re: 0, im: 0 };
+
+    const a = { re: 1 - g * s11.re, im: -g * s11.im };
+    const b = { re: 1 - g * s22.re, im: -g * s22.im };
+    const s12s21 = cmul(s12, s21);
+    const ab = cmul(a, b);
+
+    const D = { re: ab.re - g2 * s12s21.re, im: ab.im - g2 * s12s21.im };
+    const D_mag2 = D.re * D.re + D.im * D.im;
+    if (D_mag2 < 1e-12) {
+      new_S11[i] = s11;
+      new_S21[i] = s21;
+      new_S12[i] = s12;
+      new_S22[i] = s22;
+      continue;
+    }
+
+    const g_s12s21_re = g * s12s21.re, g_s12s21_im = g * s12s21.im;
+    const num11_temp = cmul({ re: s11.re - g, im: s11.im }, b);
+    const num22_temp = cmul({ re: s22.re - g, im: s22.im }, a);
+    new_S11[i] = cdiv({ re: num11_temp.re + g_s12s21_re, im: num11_temp.im + g_s12s21_im }, D, D_mag2);
+    new_S22[i] = cdiv({ re: num22_temp.re + g_s12s21_re, im: num22_temp.im + g_s12s21_im }, D, D_mag2);
+    new_S21[i] = cdiv({ re: s21.re * one_minus_g2, im: s21.im * one_minus_g2 }, D, D_mag2);
+    new_S12[i] = cdiv({ re: s12.re * one_minus_g2, im: s12.im * one_minus_g2 }, D, D_mag2);
+  }
+  return { ...slot, z0: targetZ0, S11: new_S11, S21: new_S21, S12: new_S12, S22: new_S22 };
+}

@@ -65,7 +65,7 @@
 /* =========================================
    4. ШРИФТЫ UI (Интерфейс)
    ========================================= */
- --font: 'Arial', sans-serif;
+ --font: 'Tahoma', Roboto, sans-serif;
  --font-ui:         400 14px/1.0 var(--font); /* Основной текст, лейблы, селекты */
  --font-ui-small:   400 13px/1.0 var(--font); /* Таблицы, контекстное меню */
  --font-ui-title:   700 15px/1.0 var(--font); /* Заголовки секций */
@@ -124,46 +124,10 @@ select:focus {
 /* =========================================
    ЭЛЕМЕНТЫ УПРАВЛЕНИЯ (CONTROLS)
    ========================================= */
-.side-panel {
- width: 210px; 
- min-width: 210px; 
- background: var(--surface);
- border-radius: 5px;
- padding: 5px;
- display: flex;
- flex-direction: column;
- gap: 10px;
- overflow-y: auto;
- border: 1px solid var(--border);
-}
-
-.side-panel label {
- font: var(--font-ui-title);
- color: var(--muted);
- margin-bottom: 8px;
- border-bottom: 1px solid var(--border);
- padding-bottom: 5px;
-}
-
 .flabel {
  min-width: 45px;
  text-align: right;
  padding-right: 5px;
-}
-
-.side-panel input, .velocity {
- width: 100%;
- padding: 3px 6px;
- background: var(--bg);
- color: var(--text);
- border: 1px solid var(--border);
- border-radius: 3px;
- font: var(--font-ui);
- text-align: right;
-}
-.side-panel input:focus {
- outline: none;
- border-color: var(--accent);
 }
 
 .main-area {
@@ -224,6 +188,56 @@ canvas {
 .bar-column { display: flex; flex-direction: column; gap: 4px; }
 
 /* =========================================
+   Левая панель
+   ========================================= */
+.side-panel {
+ width: 210px; 
+ min-width: 210px; 
+ background: var(--surface);
+ display: flex;
+ flex-direction: column;
+ gap: 4px;
+ overflow-y: auto;
+}
+
+.bar-panel {
+ display: flex;
+ flex-direction: column;
+ gap: 4px;
+ border: 1px solid var(--border);
+ border-radius: 4px;
+ padding: 6px 4px;
+}
+
+.bar-panel label {
+ font: var(--font-ui-title);
+ color: var(--muted);
+ cursor: pointer;
+ display: flex;
+ width: 100%;
+ padding: 0 5px 3px;
+}
+
+.bar-panel > label::before { content: '▸'; }
+.bar-panel.collapsed > label::before { content: '▾'; }
+.bar-panel.collapsed > :not(label) { display: none; }
+
+.side-panel input, .velocity {
+ width: 100%;
+ padding: 3px 6px;
+ background: var(--bg);
+ color: var(--text);
+ border: 1px solid var(--border);
+ border-radius: 3px;
+ font: var(--font-ui);
+ text-align: right;
+}
+.side-panel input:focus {
+ outline: none;
+ border-color: var(--accent);
+}
+
+/* =========================================
    КНОПКИ (BUTTONS)
    ========================================= */
 .btn-main, .trace-btn {
@@ -267,15 +281,17 @@ canvas {
 }
 
 /* =========================================
-   ТАБЛИЦА МАРКЕРОВ
+   Таблица боковой панели
    ========================================= */
 .table-wrapper {
  width: 100%;
- height: 171px;
- border: 1px solid var(--border);
+ height: auto;
  border-radius: 4px;
  overflow-y: auto;
  background: var(--surface);
+}
+.table-wrapper#marker {
+ max-height: 171px;
 }
 
 .table {
@@ -327,6 +343,8 @@ canvas {
    ========================================= */
 .context-menu {
  display: none;
+ margin: 3px 0;
+ padding: 5px 0;
  position: absolute;
  background: var(--surface);
  border: 1px solid var(--border);
@@ -336,13 +354,12 @@ canvas {
 }
 .context-menu-item {
  font: var(--font-ui);
- padding: 4px 8px;
+ padding: 4px;
  cursor: pointer;
  color: var(--text);
  white-space: break-spaces;
  border-radius: 4px;
- display: flex;
- align-items: center;
+ align-items: baseline;
  height: 20px;
 }
 .context-menu-item.disabled {

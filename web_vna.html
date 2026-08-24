@@ -9,14 +9,14 @@
 <body>
 <div class="container">
  <div class="side-panel">
-  <div class="bar-column">
+  <div class="bar-panel">
    <label>Frequency</label>
    <div class="bar-row"><div class ="flabel">Start:</div><input type="text" id="freqStart" data-field="start"></div>
    <div class="bar-row"><div class ="flabel">Stop:</div><input type="text" id="freqStop"  data-field="stop"></div>
    <div class="bar-row"><div class ="flabel">Center:</div><input type="text" id="freqCenter" data-field="center"></div>
    <div class="bar-row"><div class ="flabel">Span:</div><input type="text" id="freqSpan"  data-field="span"></div>
   </div>
-  <div class="bar-column">
+  <div class="bar-panel">
    <label>Traces</label>
    <div class="bar-row">
     <button class="trace-btn" id="btnM0" onclick="toggleTrace(0)" oncontextmenu="showSlotMenu(event, 0)">Live</button>
@@ -26,11 +26,11 @@
     <button class="trace-btn" id="btnM4" onclick="toggleTrace(4)" oncontextmenu="showSlotMenu(event, 4)">M4</button>
    </div>
   </div>
-  <div class="bar-column">
+  <div class="bar-panel">
    <label>Markers</label>
    <div class="bar-row">
-    <button class="btn-main" onclick="addMarker('freq')" title="Add frequency marker">+ ƒ</button>
-    <button class="btn-main" onclick="addMarker('time')" title="Add time marker">+ 🕐</button>
+    <button class="btn-main" onclick="addMarker('freq')" title="Add frequency marker">+ƒ</button>
+    <button class="btn-main" onclick="addMarker('time')" title="Add time marker">+🕐</button>
     <button class="btn-main" onclick="changeMarker()" title="Edit active marker">
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
     </button>
@@ -38,18 +38,34 @@
      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
     </button>
    </div>
-   <div class="table-wrapper">
+   <div class="table-wrapper" id="marker">
     <table class="table">
       <thead><tr><th style="width: 42px;">№</th><th style="width: 22px;"> </th><th>Value</th></tr></thead>
       <tbody id="markerTable"></tbody>
     </table>
    </div>
   </div>
-  <div class="bar-column">
+
+  <div class="bar-panel collapsed">
+   <label>Renormalization</label>
+   <div class="table-wrapper">
+    <table class="table">
+      <thead><tr><th style="width: 45px;">Trace</th><th>Z<sub>0</sub> Impedance</th><th style="width: 40px;">Sts</th></tr></thead>
+      <tbody id="slotTable"></tbody>
+    </table>
+   </div>
+   <div class="bar-row">
+    <div class ="flabel">Z<sub>0</sub> → </div><input type="text" id="Z0Input" value="50">
+   </div>
+  </div>
+
+  <div class="bar-panel collapsed">
+   <label>Debug</label>
    <button class="btn-main" onclick="loadTestData()">Test data</button>
    <button class="btn-main" onclick="graph.resetView()">Reset scale</button>
   </div>
  </div>
+
  <div class="main-area">
    <div class="top-bar">
     <div class="bar-row">
@@ -220,7 +236,7 @@ function showContextMenu() {
   const rect = m.parent.getBoundingClientRect();
   m.style.display = 'flex';
   m.style.left = rect.left + 'px';
-  m.style.top = (rect.bottom + window.scrollY + 3) + 'px';
+  m.style.top = (rect.bottom + window.scrollY) + 'px';
 }
 function hideContextMenu() { contextMenu.style.display = 'none'; }
 function isContextMenu() { return contextMenu.style.display !== 'none';}
@@ -356,10 +372,10 @@ function updateTraceButton(slot) {
   const isVisible = graph.visibility[slot];
   btn.classList.toggle('has-data', hasData);
   btn.classList.toggle('active', hasData && isVisible);
+  updateZ0Table();
 }
 
 function updateAllTraceButtons() { for (let i = 0; i < 5; i++) updateTraceButton(i); }
-
 
 // =============================
 // File / copy / export
@@ -381,7 +397,10 @@ async function loadFile(file, slot = 0) {
   const buffer = await file.arrayBuffer();
   const data = new TextDecoder().decode(buffer);
   if (!vnaData.loadSnP(slot, data)) return;
-  if (slot == 0) graph.resetToRange(slot);
+  if (slot == 0) {
+    VNA_MATH.setZ0(vnaData.getSlotZ0(slot));
+    graph.resetToRange(slot);
+  }
   graph.visibility[slot] = true;
   updateTraceButton(slot);
   graph.redraw(true);
@@ -446,6 +465,50 @@ function updateMarkerTable() {
     markerTable.appendChild(tr);
   });
 }
+
+// =============================
+// Slots Table & System Z0
+// =============================
+const slotTable = $('slotTable');
+const Z0Input = $('Z0Input');
+
+function updateZ0Table() {
+  slotTable.innerHTML = '';
+  const sysZ0 = VNA_MATH.Z0;
+
+  for (let i = 0; i < vnaData.slotsCount; i++) {
+    const s = vnaData.slots[i];
+    // Показываем только слоты с данными
+    if (!s.frequencies || s.frequencies.length === 0) continue;
+
+    const isRenorm = s.z0 !== sysZ0;
+    const minF = formatFreqValue(s.frequencies[0]);
+    const maxF = formatFreqValue(s.frequencies[s.frequencies.length - 1]);
+    const name = i === 0 ? 'Live' : `M${i}`;
+
+    const tr = document.createElement('tr');
+    if (isRenorm) tr.classList.add('renormalized');
+
+    tr.innerHTML = `
+      <td>${name}</td>
+      <td>${isRenorm ? s.z0 + ' → ' : ''}${sysZ0} Ω</td>
+      <td style="text-align: center;">${isRenorm ? '⚠️' : '✓'}</td>
+    `;
+    slotTable.appendChild(tr);
+  }
+
+  Z0Input.value = `${VNA_MATH.Z0} Ω`;
+}
+
+function onSysZ0Change(e) {
+  VNA_MATH.setZ0(parseFloat(e.target.value.replace(',', '.')));
+  updateZ0Table();
+  graph.redraw(true);
+}
+
+// Подписка на события ввода системного Z0
+Z0Input.addEventListener('change', onSysZ0Change);
+Z0Input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.target.blur(); } });
 
 // =============================
 // Area panel creation and sync
@@ -541,8 +604,8 @@ function showTraceTypeDropdown(e, area) {
   if (!m) return;
   const groups = {
     'ALL': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_ALL),
-    'S11/S22': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
-    'S21/S12': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_THRU)
+    'S<sub>11</sub> / S<sub>22</sub>': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_REFLECT),
+    'S<sub>21</sub> / S<sub>12</sub>': Object.keys(TRACE_TYPES).filter(k => TRACE_TYPES[k].valid === CH_THRU)
   };
   for (const [groupName, types] of Object.entries(groups)) {
     for (let i = 0; i < types.length; i += MAX_ROWS) {
@@ -717,7 +780,6 @@ function showLayoutDropdown(e) {
 function changeLayout(layoutId) {
   const r = LAYOUT_PRESETS[layoutId]?.r;
   if (!r) return;
-  localStorage.setItem('vna-layout', layoutId);
   graph.setRegions(r.map(([l, t, ri, b]) => ({ leftPct: l, topPct: t, rightPct: ri, bottomPct: b })));
   buildAreaPanels();
   updateLayoutButtonText(layoutId);
@@ -730,12 +792,49 @@ function initLayouts() {
 }
 
 // =============================
+// Панели слева
+// =============================
+function initCollapsiblePanels() {
+  document.querySelectorAll('.side-panel .bar-panel > label').forEach(label => {
+    label.addEventListener('click', () => { label.parentElement.classList.toggle('collapsed'); });
+  });
+}
+
+// =============================
+// Сохранение/загрузка всего состояния в localStorage
+// =============================
+function saveState() {
+  const panelState = {};
+  document.querySelectorAll('.side-panel .bar-panel > label').forEach(label => {
+    panelState[label.textContent.trim()] = label.parentElement.classList.contains('collapsed');
+  });
+  localStorage.setItem('vna_panels', JSON.stringify(panelState));
+  localStorage.setItem('vna-z0', VNA_MATH.Z0);
+  localStorage.setItem('vna-layout', btnLayout.layoutId);
+}
+
+function loadState() {
+  try {
+    const state = JSON.parse(localStorage.getItem('vna_panels'));
+    document.querySelectorAll('.side-panel .bar-panel > label').forEach(label => {
+     const panel = label.parentElement;
+     if (state[label.textContent.trim()] === true) panel.classList.add('collapsed');
+     else panel.classList.remove('collapsed');
+    });
+  } catch (e) { localStorage.removeItem('vna_panels');
+ }
+  VNA_MATH.Z0 = Number(localStorage.getItem('vna-z0')) ?? 50;
+}
+
+// =============================
 //  Инициализация
 // =============================
 async function main() {
   // Web UI
   initThemes();
   hideContextMenu();
+  initCollapsiblePanels();
+  loadState();
 
   // Data and renders
   vnaData = new VNAData(5);
@@ -756,6 +855,9 @@ async function main() {
   
   //  Block events if menu open
   ['mousemove', 'mousedown', 'wheel', 'dblclick'].forEach(evt => contextMenu.addEventListener(evt, e => e.stopPropagation()));
+  
+  document.addEventListener('visibilitychange', () => {if (document.visibilityState === 'hidden') saveState(); });
+  window.addEventListener('beforeunload', () => saveState());
 }
 
 document.addEventListener('DOMContentLoaded', main);
