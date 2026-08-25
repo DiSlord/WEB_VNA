@@ -193,7 +193,7 @@ canvas {
 .side-panel {
  width: 210px; 
  min-width: 210px; 
- background: var(--surface);
+ background: var(--bg);
  display: flex;
  flex-direction: column;
  gap: 4px;
@@ -202,6 +202,7 @@ canvas {
 
 .bar-panel {
  display: flex;
+ background: var(--surface);
  flex-direction: column;
  gap: 4px;
  border: 1px solid var(--border);

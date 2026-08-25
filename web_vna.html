@@ -823,7 +823,7 @@ function loadState() {
     });
   } catch (e) { localStorage.removeItem('vna_panels');
  }
-  VNA_MATH.Z0 = Number(localStorage.getItem('vna-z0')) ?? 50;
+  VNA_MATH.Z0 = Number(localStorage.getItem('vna-z0')) || 50;
 }
 
 // =============================
